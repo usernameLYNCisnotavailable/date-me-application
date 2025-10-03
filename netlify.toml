@@ -1,0 +1,5 @@
+# SPA routing so /@handle and /p/<uid> work on refresh
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
