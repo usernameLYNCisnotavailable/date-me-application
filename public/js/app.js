@@ -1,19 +1,13 @@
 import { ageFromBirthdate, allowedPairing, el } from './utils.js';
 
-// Firebase
+// Firebase (compat)
 const app = firebase.initializeApp(window.firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// LocalStorage keys
-const LS = {
-  draftQuestions: 'lynctree_draft_questions',
-  pendingAnswers: targetUid => `pending_answers_${targetUid}`,
-  pendingTarget: 'pending_target_uid',
-  pendingRedirect: 'pending_redirect_after_auth'
-};
-
-// Routes
+/* ==============================
+   Routing helpers
+============================== */
 const routes = {
   '': renderCreate,
   '#/create': renderCreate,
@@ -23,46 +17,75 @@ const routes = {
   '#/messages': renderMessages,
 };
 
-// Helpers for deep links: /@handle or /p/uid
 function isHandle(s){ return /^@[\w.\-]{2,30}$/.test(s); }
 function deepLink(){
   const p = location.pathname;
+  // /@handle
   const m1 = p.match(/^\/(@[\w.\-]{2,30})$/);
   if (m1) return { kind:'handle', value:m1[1] };
+  // /p/<uid>
   const m2 = p.match(/^\/p\/([A-Za-z0-9_-]{6,})$/);
   if (m2) return { kind:'uid', value:m2[1] };
+  // ?u=handle fallback
   const u = new URLSearchParams(location.search).get('u');
   if (u) return { kind:'handle', value: '@' + u.replace(/^@/, '') };
+  // #/@handle fallback
   const h = location.hash;
   if (h.startsWith('#/@') && isHandle(h.slice(2))) return { kind:'handle', value:h.slice(1) };
   return null;
 }
 
-// Nav hooks
 window.addEventListener('hashchange', mount);
 window.addEventListener('popstate', mount);
 window.addEventListener('load', mount);
 
-document.getElementById('btn-create').onclick = ()=> location.hash = '#/create';
-document.getElementById('btn-inbox').onclick  = ()=> location.hash = '#/inbox';
-document.getElementById('btn-profile').onclick= ()=> location.hash = '#/me';
-document.getElementById('btn-auth').onclick   = ()=> location.hash = '#/auth';
-document.getElementById('btn-messages').onclick=()=> location.hash = '#/messages';
+document.getElementById('btn-create').onclick   = ()=> location.hash = '#/create';
+document.getElementById('btn-inbox').onclick    = ()=> location.hash = '#/inbox';
+document.getElementById('btn-profile').onclick  = ()=> location.hash = '#/me';
+document.getElementById('btn-auth').onclick     = ()=> location.hash = '#/auth';
+document.getElementById('btn-messages').onclick = ()=> location.hash = '#/messages';
 
-// Auto-finish pending submission after auth
+function toast(m){ alert(m); }
+
+async function mount(){
+  const root = document.getElementById('app');
+  root.innerHTML = '';
+
+  const link = deepLink();
+  if (link){
+    if (link.kind === 'handle') return renderViewByHandle(link.value);
+    if (link.kind === 'uid')    return renderViewByUid(link.value);
+  }
+  const fn = routes[location.hash || '#/create'] || renderCreate;
+  await fn();
+}
+
+/* ==============================
+   Local cache keys
+============================== */
+const LS = {
+  draftQuestions: 'lynctree_draft_questions',
+  pendingAnswers: targetUid => `pending_answers_${targetUid}`,
+  pendingTarget: 'pending_target_uid',
+  pendingRedirect: 'pending_redirect_after_auth'
+};
+
+/* ==============================
+   Auth watcher: auto-finish pending submission
+============================== */
 auth.onAuthStateChanged(async (u)=>{
-  const pendingTarget = localStorage.getItem(LS.pendingTarget);
+  const target = localStorage.getItem(LS.pendingTarget);
   const redirect = localStorage.getItem(LS.pendingRedirect);
-  if (u && pendingTarget){
+  if (u && target){
     try{
-      const stored = JSON.parse(localStorage.getItem(LS.pendingAnswers(pendingTarget)) || '[]');
-      await submitAnswersFlow(pendingTarget, stored);
+      const stored = JSON.parse(localStorage.getItem(LS.pendingAnswers(target)) || '[]');
+      await submitAnswersFlow(target, stored);
       toast('Submitted!');
     }catch(e){
-      console.warn('Auto submit after auth failed', e);
+      console.warn('Auto-submit failed:', e);
       toast(e?.message || 'Submission failed after sign-in.');
     }finally{
-      localStorage.removeItem(LS.pendingAnswers(pendingTarget));
+      localStorage.removeItem(LS.pendingAnswers(target));
       localStorage.removeItem(LS.pendingTarget);
       localStorage.removeItem(LS.pendingRedirect);
       if (redirect) location.href = redirect;
@@ -71,23 +94,9 @@ auth.onAuthStateChanged(async (u)=>{
   }
 });
 
-async function mount(){
-  const root = document.getElementById('app');
-  root.innerHTML = '';
-  const link = deepLink();
-  if (link){
-    if (link.kind === 'handle') return renderViewByHandle(link.value);
-    if (link.kind === 'uid') return renderViewByUid(link.value);
-  }
-  const fn = routes[location.hash || '#/create'] || renderCreate;
-  await fn();
-}
-
-function toast(m){ alert(m); }
-
 /* ==============================
-   CREATE PAGE (p1 writes qs)
-   ============================== */
+   CREATE (p1 writes questions)
+============================== */
 async function renderCreate(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-create');
@@ -106,18 +115,6 @@ async function renderCreate(){
   }
   renumber();
 
-  function add(preset=''){
-    const count = list.querySelectorAll('.bubble').length;
-    if (count >= 7) return toast('Limit is 7 questions.');
-    list.appendChild(makeBubble(preset, count));
-    renumber();
-  }
-  function renumber(){
-    [...list.querySelectorAll('.bubble label')].forEach((lab, idx)=> lab.textContent = 'Question ' + (idx+1));
-    const canDelete = list.querySelectorAll('.bubble').length > 2;
-    list.querySelectorAll('.btn-del').forEach(btn=> btn.disabled = !canDelete);
-  }
-
   addBtn.onclick = ()=> add('What makes you laugh unexpectedly?');
   saveBtn.onclick = ()=>{
     localStorage.setItem(LS.draftQuestions, JSON.stringify(collect()));
@@ -126,13 +123,13 @@ async function renderCreate(){
   publishBtn.onclick = async ()=>{
     const qs = collect();
     if (qs.length < 2) return toast('Minimum 2 questions.');
-    localStorage.setItem(LS.draftQuestions, JSON.stringify(qs));
     if (!auth.currentUser){ await renderAuth(); if (!auth.currentUser) return; }
     await ensureProfile(auth.currentUser.uid);
     await db.collection('profiles').doc(auth.currentUser.uid).set({
       questions: qs,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge:true });
+    localStorage.setItem(LS.draftQuestions, JSON.stringify(qs));
     toast('Published! Share your link from Me.');
     location.hash = '#/me';
   };
@@ -144,6 +141,17 @@ async function renderCreate(){
       if (v) out.push(v.slice(0,120));
     });
     return out;
+  }
+  function add(preset=''){
+    const count = list.querySelectorAll('.bubble').length;
+    if (count >= 7) return toast('Limit is 7 questions.');
+    list.appendChild(makeBubble(preset, count));
+    renumber();
+  }
+  function renumber(){
+    [...list.querySelectorAll('.bubble label')].forEach((lab, idx)=> lab.textContent = 'Question ' + (idx+1));
+    const canDelete = list.querySelectorAll('.bubble').length > 2;
+    list.querySelectorAll('.btn-del').forEach(btn=> btn.disabled = !canDelete);
   }
   function makeBubble(text, index){
     const del = el('button', { class:'btn icon btn-del', title:'Delete', onclick: (e)=>{
@@ -162,8 +170,8 @@ async function renderCreate(){
 }
 
 /* ==============================
-   AUTH
-   ============================== */
+   AUTH (email+password only)
+============================== */
 async function renderAuth(){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -195,7 +203,6 @@ async function renderAuth(){
   });
 }
 
-// Make sure a basic user doc + handle exists
 async function ensureProfile(uid, extra = {}){
   const ref = db.collection('users').doc(uid);
   const snap = await ref.get();
@@ -218,8 +225,8 @@ async function ensureProfile(uid, extra = {}){
 }
 
 /* ==============================
-   ME
-   ============================== */
+   ME (profile + share links)
+============================== */
 async function renderMe(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-profile');
@@ -244,9 +251,9 @@ async function renderMe(){
 
   const base = location.origin;
   const handleLink = `${base}/@${u.handle}`;
-  const uidLink = `${base}/p/${uid}`;
+  const uidLink    = `${base}/p/${uid}`;
   document.getElementById('share-handle').value = handleLink;
-  document.getElementById('share-uid').value = uidLink;
+  document.getElementById('share-uid').value    = uidLink;
   document.getElementById('copy-handle').onclick = ()=> { navigator.clipboard.writeText(handleLink); toast('Copied handle link'); };
   document.getElementById('copy-uid').onclick    = ()=> { navigator.clipboard.writeText(uidLink); toast('Copied backup link'); };
 
@@ -262,7 +269,7 @@ async function renderMe(){
 
 /* ==============================
    VIEW p1 BY HANDLE/UID (p2 answers)
-   ============================== */
+============================== */
 async function renderViewByHandle(handleWithAt){
   const handle = handleWithAt.startsWith('@') ? handleWithAt.slice(1) : handleWithAt;
   const hDoc = await db.collection('handles').doc(handle).get();
@@ -282,6 +289,7 @@ async function renderViewByUid(uid){
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
 
+  // Header
   document.getElementById('vp-avatar').src = u.photoURL || '/img/placeholder-avatar.png';
   document.getElementById('vp-handle').textContent = '@' + (u.handle || 'unknown');
   document.getElementById('vp-name').textContent = u.displayName || u.handle || 'Friend';
@@ -290,14 +298,17 @@ async function renderViewByUid(uid){
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
+  // Questionnaire form
   const form = document.getElementById('answer-form');
-  const alreadyNote = document.getElementById('already-note');
+  const alreadyNote = el('p', { class:'muted small', style:'margin-top:6px' }, "You’ve already sent one to this person.");
+  alreadyNote.style.display = 'none';
+  form.parentElement.appendChild(alreadyNote);
 
-  // Build fields, restore local answers
-  const restore = loadLocal(uid);
+  // Restore local cached answers
+  const restored = loadLocal(uid);
   (p.questions || []).forEach((q, idx)=>{
     const ta = el('textarea', { placeholder:'Your answer...' }, '');
-    ta.value = restore[idx] || '';
+    ta.value = restored[idx] || '';
     ta.addEventListener('input', ()=> saveLocal(uid, collectAnswers(form)));
     form.appendChild(el('div', { class:'bubble card' }, [
       el('div', { class:'q' }, q),
@@ -305,22 +316,24 @@ async function renderViewByUid(uid){
     ]));
   });
 
-  // If signed in, show "already sent" note using responder-owned sentRequests
+  // If signed in, pre-check duplicate via my sentRequests
   if (auth.currentUser){
     const me = auth.currentUser.uid;
     const sent = await db.collection('users').doc(me).collection('sentRequests').doc(uid).get();
-    if (sent.exists){
-      alreadyNote.style.display = 'block';
-    }
+    if (sent.exists) alreadyNote.style.display = 'block';
   }
 
-  document.getElementById('submit-answers').onclick = async ()=>{
-    const collected = collectAnswers(form);
+  // Submit
+  const submitBtn = document.getElementById('submit-answers') || el('button', { class:'btn success' }, 'Submit');
+  if (!submitBtn.parentElement) form.parentElement.appendChild(submitBtn);
+
+  submitBtn.onclick = async ()=>{
+    const answers = collectAnswers(form);
     // Save locally before any redirect
-    saveLocal(uid, collected);
+    saveLocal(uid, answers);
 
     if (!auth.currentUser){
-      // Remember where we were so we can return and auto-submit post-auth
+      // Remember intent and come back here after auth
       localStorage.setItem(LS.pendingTarget, uid);
       localStorage.setItem(LS.pendingRedirect, location.pathname + location.search + location.hash);
       location.hash = '#/auth';
@@ -328,13 +341,13 @@ async function renderViewByUid(uid){
     }
 
     try{
-      await submitAnswersFlow(uid, collected);
+      await submitAnswersFlow(uid, answers);   // throws if duplicate
       clearLocal(uid);
       toast('Submitted!');
-      // Reset to how it looked first time: re-render p1 page
+      // Reset to initial view (still show p1 page)
       renderViewByUid(uid);
     }catch(err){
-      toast(err.message || 'Submit failed');
+      toast(err?.message || 'Submit failed');
     }
   };
 }
@@ -354,17 +367,15 @@ function clearLocal(uid){
   localStorage.removeItem(LS.pendingAnswers(uid));
 }
 
-// Submit without touching creator-owned reads; check duplicates via responder-owned sentRequests
+// One-way submit with duplicate check on responder side only
 async function submitAnswersFlow(targetUid, answers){
   if (!auth.currentUser) throw new Error('Not signed in');
   const me = auth.currentUser.uid;
 
-  // block duplicate using my own sentRequests
   const sentRef = db.collection('users').doc(me).collection('sentRequests').doc(targetUid);
   const sentSnap = await sentRef.get();
   if (sentSnap.exists) throw new Error("You've already sent one.");
 
-  // Create application in creator’s inbox
   await db.collection('users').doc(targetUid).collection('applications').doc(me).set({
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     answers,
@@ -372,7 +383,6 @@ async function submitAnswersFlow(targetUid, answers){
     status: 'pending'
   });
 
-  // Track on responder side
   await sentRef.set({
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     status: 'pending'
@@ -402,7 +412,7 @@ async function makeResponderSnapshot(uid){
 
 /* ==============================
    INBOX + DETAIL
-   ============================== */
+============================== */
 async function renderInbox(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-inbox');
@@ -485,8 +495,8 @@ async function renderInboxDetail(responderUid){
 }
 
 /* ==============================
-   MESSAGES PLACEHOLDER
-   ============================== */
+   MESSAGES placeholder
+============================== */
 async function renderMessages(){
   const root = document.getElementById('app');
   root.innerHTML = '<section class="container narrow"><div class="card">Messaging UI coming next. Friendships exist after acceptance.</div></section>';
