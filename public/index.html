@@ -22,9 +22,6 @@
 
   <main id="app"></main>
 
-  <!-- templates omitted here for brevity in this code cell; inserted below in full variable -->
-  <!-- We'll inject full HTML after this string is concatenated -->
-
   <!-- CREATE -->
   <template id="tpl-create">
     <section class="container narrow">
@@ -39,6 +36,7 @@
     </section>
   </template>
 
+  <!-- INBOX -->
   <template id="tpl-inbox">
     <section class="container narrow">
       <h1 class="title">Inbox</h1>
@@ -46,6 +44,7 @@
     </section>
   </template>
 
+  <!-- INBOX DETAIL -->
   <template id="tpl-inbox-detail">
     <section class="container narrow">
       <button class="btn" id="back-inbox">← Back</button>
@@ -58,6 +57,7 @@
     </section>
   </template>
 
+  <!-- PROFILE (ME) -->
   <template id="tpl-profile">
     <section class="container narrow">
       <div class="profile-card">
@@ -89,6 +89,7 @@
     </section>
   </template>
 
+  <!-- VIEW SOMEONE'S PROFILE -->
   <template id="tpl-view-profile">
     <section class="container narrow">
       <div class="profile-card">
@@ -108,6 +109,7 @@
     </section>
   </template>
 
+  <!-- AUTH -->
   <template id="tpl-auth">
     <section class="container narrow">
       <h1 class="title">Join or sign in</h1>
@@ -126,6 +128,7 @@
     </section>
   </template>
 
+  <!-- MESSAGES (placeholder UI) -->
   <template id="tpl-messages">
     <section class="container narrow">
       <h1 class="title">Messages</h1>
@@ -142,6 +145,7 @@
     </section>
   </template>
 
+  <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore-compat.js"></script>
