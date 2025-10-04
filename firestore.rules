@@ -1,78 +1,110 @@
-// Firestore security rules for Lync Tree
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---------- helpers ----------
     function isSignedIn() {
       return request.auth != null;
     }
     function isOwner(uid) {
       return isSignedIn() && request.auth.uid == uid;
     }
-    function ageFromBirthdate(dateStr) {
-      // Client must provide computed age and we validate ranges instead of recomputing here.
-      return 0; // placeholder; we gate by structure below.
+    // array contains helper (because hasAny/hasOnly are clunky)
+    function arrContains(arr, v) {
+      return arr.size() > 0 && arr.values().hasOnly(arr.values()) && v in arr;
     }
 
-    // Public handle map read-only
+    // ---------- handles (unique usernames) ----------
     match /handles/{handle} {
       allow read: if true;
-      allow write: if isSignedIn(); // written on profile init only
+      // Claimed only by signed-in users. No updates/deletes.
+      allow create: if isSignedIn()
+        && !exists(/databases/$(database)/documents/handles/$(handle));
+      allow update, delete: if false;
     }
 
-    // Publicly readable user profiles (limited fields)
+    // ---------- users (public-ish profile base doc) ----------
     match /users/{uid} {
+      // Public read is OK; keep sensitive fields out of this doc.
       allow read: if true;
-      allow write: if isOwner(uid);
+
+      // Only the owner can write; prevent clients from giving themselves admin.
+      allow write: if isOwner(uid)
+        && !( "admin" in request.resource.data )  // don't let clients set admin flags here
+        ;
+
+      // Sent requests mirror under user
+      match /sentRequests/{other} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Inbox: applications received by a creator from a responder
+      match /applications/{responder} {
+        // Only the creator sees their inbox
+        allow read: if isOwner(uid);
+
+        // Create exactly once, by the responder themselves, with sane payload
+        allow create: if isSignedIn()
+          && request.auth.uid == responder
+          && !exists(/databases/$(database)/documents/users/$(uid)/applications/$(responder))
+          && request.resource.data.answers is list
+          && request.resource.data.answers.size() >= 1
+          && request.resource.data.answers.size() <= 7
+          && request.resource.data.status == "pending";
+
+        // Creator can move status between allowed values
+        allow update: if isOwner(uid)
+          && request.resource.data.status in ["pending","accepted","rejected"];
+
+        allow delete: if false;
+      }
     }
 
-    // Questions for a profile
+    // ---------- profiles (public questions for each user) ----------
     match /profiles/{uid} {
       allow read: if true;
+
+      // Owner may set questions with tight limits
       allow write: if isOwner(uid)
         && request.resource.data.keys().hasOnly(['questions','updatedAt'])
         && request.resource.data.questions is list
         && request.resource.data.questions.size() >= 2
         && request.resource.data.questions.size() <= 7
+        // at least first element is string (cheap type guard; list is capped at 7 anyway)
         && request.resource.data.questions[0] is string;
     }
 
-    // Applications received by a user
-    match /users/{creator}/applications/{responder} {
-      allow read: if isOwner(creator); // only creator sees their inbox
-      allow create: if isSignedIn()
-        && request.auth.uid == responder
-        && !exists(/databases/$(database)/documents/users/$(creator)/applications/$(responder))
-        && request.resource.data.answers is list
-        && request.resource.data.answers.size() <= 7
-        && request.resource.data.status == "pending";
-      allow update: if isOwner(creator)
-        && request.resource.data.status in ["pending","accepted","rejected"];
-      allow delete: if false;
-    }
-
-    // Sent requests list
-    match /users/{uid}/sentRequests/{other} {
-      allow read: if isOwner(uid);
-      allow write: if isOwner(uid);
-    }
-
-    // Friendships (undirected)
+    // ---------- friendships (undirected pair doc) ----------
+    // Store array field users: [uidA, uidB] sorted
     match /friendships/{pairId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn(); // accept uses this; real app should constrain better
+      // Read only if you're part of it
+      allow read: if isSignedIn()
+        && arrContains(resource.data.users, request.auth.uid);
+
+      // Create/update only if:
+      // - signed in
+      // - the doc has exactly 2 users
+      // - the caller is one of them
+      allow create, update: if isSignedIn()
+        && request.resource.data.users is list
+        && request.resource.data.users.size() == 2
+        && arrContains(request.resource.data.users, request.auth.uid);
+
+      // No deletes for now
+      allow delete: if false;
+
+      // Messages: visible only to the two users in parent doc
+      match /messages/{msgId} {
+        allow read, create: if isSignedIn()
+          && arrContains(get(/databases/$(database)/documents/friendships/$(pairId)).data.users, request.auth.uid);
+        allow update, delete: if false;
+      }
     }
 
-    // Messaging subcollections under /friendships/{pairId}/messages/{msgId}
-    match /friendships/{pairId}/messages/{msgId} {
-      allow read, create: if isSignedIn()
-        && pairId.matches('^[A-Za-z0-9_]+_[A-Za-z0-9_]+$');
-      allow update, delete: if false;
-    }
-
-    // Reports and moderation
+    // ---------- moderation & reports ----------
+    // You’ll use custom auth claims to mark moderators: request.auth.token.admin == true
     match /reports/{id} {
-      allow create: if isSignedIn();
+      allow create: if isSignedIn(); // any user can report
       allow read, update: if isSignedIn() && request.auth.token.admin == true;
     }
     match /suspicions/{id} {
