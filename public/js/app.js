@@ -1,9 +1,19 @@
 import { ageFromBirthdate, allowedPairing, el } from './utils.js';
 
+// Firebase
 const app = firebase.initializeApp(window.firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
+// LocalStorage keys
+const LS = {
+  draftQuestions: 'lynctree_draft_questions',
+  pendingAnswers: targetUid => `pending_answers_${targetUid}`,
+  pendingTarget: 'pending_target_uid',
+  pendingRedirect: 'pending_redirect_after_auth'
+};
+
+// Routes
 const routes = {
   '': renderCreate,
   '#/create': renderCreate,
@@ -13,6 +23,7 @@ const routes = {
   '#/messages': renderMessages,
 };
 
+// Helpers for deep links: /@handle or /p/uid
 function isHandle(s){ return /^@[\w.\-]{2,30}$/.test(s); }
 function deepLink(){
   const p = location.pathname;
@@ -27,6 +38,7 @@ function deepLink(){
   return null;
 }
 
+// Nav hooks
 window.addEventListener('hashchange', mount);
 window.addEventListener('popstate', mount);
 window.addEventListener('load', mount);
@@ -37,7 +49,27 @@ document.getElementById('btn-profile').onclick= ()=> location.hash = '#/me';
 document.getElementById('btn-auth').onclick   = ()=> location.hash = '#/auth';
 document.getElementById('btn-messages').onclick=()=> location.hash = '#/messages';
 
-auth.onAuthStateChanged(()=>{});
+// Auto-finish pending submission after auth
+auth.onAuthStateChanged(async (u)=>{
+  const pendingTarget = localStorage.getItem(LS.pendingTarget);
+  const redirect = localStorage.getItem(LS.pendingRedirect);
+  if (u && pendingTarget){
+    try{
+      const stored = JSON.parse(localStorage.getItem(LS.pendingAnswers(pendingTarget)) || '[]');
+      await submitAnswersFlow(pendingTarget, stored);
+      toast('Submitted!');
+    }catch(e){
+      console.warn('Auto submit after auth failed', e);
+      toast(e?.message || 'Submission failed after sign-in.');
+    }finally{
+      localStorage.removeItem(LS.pendingAnswers(pendingTarget));
+      localStorage.removeItem(LS.pendingTarget);
+      localStorage.removeItem(LS.pendingRedirect);
+      if (redirect) location.href = redirect;
+      else location.hash = '#/inbox';
+    }
+  }
+});
 
 async function mount(){
   const root = document.getElementById('app');
@@ -53,8 +85,9 @@ async function mount(){
 
 function toast(m){ alert(m); }
 
-const DRAFT_KEY = 'lynctree_draft_questions';
-
+/* ==============================
+   CREATE PAGE (p1 writes qs)
+   ============================== */
 async function renderCreate(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-create');
@@ -65,7 +98,8 @@ async function renderCreate(){
   const saveBtn = document.getElementById('save-draft');
   const publishBtn = document.getElementById('publish');
 
-  (JSON.parse(localStorage.getItem(DRAFT_KEY) || '[]')).forEach((q,i)=> list.appendChild(makeBubble(q, i)));
+  (JSON.parse(localStorage.getItem(LS.draftQuestions) || '[]'))
+    .forEach((q,i)=> list.appendChild(makeBubble(q, i)));
   if (list.children.length === 0){
     add('What’s your ideal lazy day?');
     add('Two truths and a lie about you?');
@@ -86,13 +120,13 @@ async function renderCreate(){
 
   addBtn.onclick = ()=> add('What makes you laugh unexpectedly?');
   saveBtn.onclick = ()=>{
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(collect()));
+    localStorage.setItem(LS.draftQuestions, JSON.stringify(collect()));
     toast('Draft saved locally.');
   };
   publishBtn.onclick = async ()=>{
     const qs = collect();
     if (qs.length < 2) return toast('Minimum 2 questions.');
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(qs));
+    localStorage.setItem(LS.draftQuestions, JSON.stringify(qs));
     if (!auth.currentUser){ await renderAuth(); if (!auth.currentUser) return; }
     await ensureProfile(auth.currentUser.uid);
     await db.collection('profiles').doc(auth.currentUser.uid).set({
@@ -127,6 +161,9 @@ async function renderCreate(){
   }
 }
 
+/* ==============================
+   AUTH
+   ============================== */
 async function renderAuth(){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -158,6 +195,7 @@ async function renderAuth(){
   });
 }
 
+// Make sure a basic user doc + handle exists
 async function ensureProfile(uid, extra = {}){
   const ref = db.collection('users').doc(uid);
   const snap = await ref.get();
@@ -179,6 +217,9 @@ async function ensureProfile(uid, extra = {}){
   }
 }
 
+/* ==============================
+   ME
+   ============================== */
 async function renderMe(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-profile');
@@ -219,12 +260,16 @@ async function renderMe(){
   });
 }
 
+/* ==============================
+   VIEW p1 BY HANDLE/UID (p2 answers)
+   ============================== */
 async function renderViewByHandle(handleWithAt){
   const handle = handleWithAt.startsWith('@') ? handleWithAt.slice(1) : handleWithAt;
   const hDoc = await db.collection('handles').doc(handle).get();
   if (!hDoc.exists) return notFound();
   return renderViewByUid(hDoc.data().uid);
 }
+
 async function renderViewByUid(uid){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -246,36 +291,94 @@ async function renderViewByUid(uid){
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
   const form = document.getElementById('answer-form');
-  (p.questions || []).forEach((q)=>{
+  const alreadyNote = document.getElementById('already-note');
+
+  // Build fields, restore local answers
+  const restore = loadLocal(uid);
+  (p.questions || []).forEach((q, idx)=>{
+    const ta = el('textarea', { placeholder:'Your answer...' }, '');
+    ta.value = restore[idx] || '';
+    ta.addEventListener('input', ()=> saveLocal(uid, collectAnswers(form)));
     form.appendChild(el('div', { class:'bubble card' }, [
       el('div', { class:'q' }, q),
-      el('textarea', { placeholder:'Your answer...' })
+      ta
     ]));
   });
 
-  document.getElementById('submit-answers').onclick = async ()=>{
-    if (!auth.currentUser){ await renderAuth(); if (!auth.currentUser) return; }
-    const me = auth.currentUser;
-    const existing = await db.collection('users').doc(uid).collection('applications').doc(me.uid).get();
-    if (existing.exists) return toast('You already applied to this profile.');
+  // If signed in, show "already sent" note using responder-owned sentRequests
+  if (auth.currentUser){
+    const me = auth.currentUser.uid;
+    const sent = await db.collection('users').doc(me).collection('sentRequests').doc(uid).get();
+    if (sent.exists){
+      alreadyNote.style.display = 'block';
+    }
+  }
 
-    const answers = [];
-    form.querySelectorAll('textarea').forEach(t=> answers.push((t.value||'').slice(0,2000)));
-    const snapshotResponder = await makeResponderSnapshot(me.uid);
-    await db.collection('users').doc(uid).collection('applications').doc(me.uid).set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      answers,
-      responder: snapshotResponder,
-      status: 'pending'
-    });
-    await db.collection('users').doc(me.uid).collection('sentRequests').doc(uid).set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      status: 'pending'
-    });
-    toast('Submitted!');
-    location.hash = '#/inbox';
+  document.getElementById('submit-answers').onclick = async ()=>{
+    const collected = collectAnswers(form);
+    // Save locally before any redirect
+    saveLocal(uid, collected);
+
+    if (!auth.currentUser){
+      // Remember where we were so we can return and auto-submit post-auth
+      localStorage.setItem(LS.pendingTarget, uid);
+      localStorage.setItem(LS.pendingRedirect, location.pathname + location.search + location.hash);
+      location.hash = '#/auth';
+      return;
+    }
+
+    try{
+      await submitAnswersFlow(uid, collected);
+      clearLocal(uid);
+      toast('Submitted!');
+      // Reset to how it looked first time: re-render p1 page
+      renderViewByUid(uid);
+    }catch(err){
+      toast(err.message || 'Submit failed');
+    }
   };
 }
+
+function collectAnswers(form){
+  const arr = [];
+  form.querySelectorAll('textarea').forEach(t=> arr.push((t.value||'').slice(0,2000)));
+  return arr;
+}
+function loadLocal(uid){
+  try{ return JSON.parse(localStorage.getItem(LS.pendingAnswers(uid)) || '[]'); }catch{ return []; }
+}
+function saveLocal(uid, answers){
+  localStorage.setItem(LS.pendingAnswers(uid), JSON.stringify(answers));
+}
+function clearLocal(uid){
+  localStorage.removeItem(LS.pendingAnswers(uid));
+}
+
+// Submit without touching creator-owned reads; check duplicates via responder-owned sentRequests
+async function submitAnswersFlow(targetUid, answers){
+  if (!auth.currentUser) throw new Error('Not signed in');
+  const me = auth.currentUser.uid;
+
+  // block duplicate using my own sentRequests
+  const sentRef = db.collection('users').doc(me).collection('sentRequests').doc(targetUid);
+  const sentSnap = await sentRef.get();
+  if (sentSnap.exists) throw new Error("You've already sent one.");
+
+  // Create application in creator’s inbox
+  await db.collection('users').doc(targetUid).collection('applications').doc(me).set({
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    answers,
+    responder: await makeResponderSnapshot(me),
+    status: 'pending'
+  });
+
+  // Track on responder side
+  await sentRef.set({
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    status: 'pending'
+  });
+}
+
 function notFound(){
   const root = document.getElementById('app');
   root.innerHTML = "<section class='container narrow'><div class='card'>User not found.</div></section>";
@@ -297,6 +400,9 @@ async function makeResponderSnapshot(uid){
   };
 }
 
+/* ==============================
+   INBOX + DETAIL
+   ============================== */
 async function renderInbox(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-inbox');
@@ -378,6 +484,9 @@ async function renderInboxDetail(responderUid){
   }
 }
 
+/* ==============================
+   MESSAGES PLACEHOLDER
+   ============================== */
 async function renderMessages(){
   const root = document.getElementById('app');
   root.innerHTML = '<section class="container narrow"><div class="card">Messaging UI coming next. Friendships exist after acceptance.</div></section>';
