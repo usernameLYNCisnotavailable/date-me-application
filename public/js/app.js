@@ -199,7 +199,6 @@ async function renderAuth(){
   });
 }
 
-// Make sure a basic user doc + handle exists
 async function ensureProfile(uid, extra = {}){
   const ref = db.collection('users').doc(uid);
   const snap = await ref.get();
@@ -222,7 +221,7 @@ async function ensureProfile(uid, extra = {}){
 }
 
 /* ==============================
-   ME (profile + display name edit + avatar upload)
+   ME (profile + single Edit Profile)
 ============================== */
 async function renderMe(){
   const root = document.getElementById('app');
@@ -245,50 +244,70 @@ async function renderMe(){
 
   avatarEl.src = u.photoURL || '/img/placeholder-avatar.png';
   handleEl.textContent = '@' + u.handle;
-  nameEl.textContent = u.displayName || u.handle;
+  nameEl.textContent = u.displayName || u.handle;  // public name
   locEl.textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
   bioEl.textContent = u.bio || '';
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
-  // Inline editor for display name
-  const nameRow = el('div', { class:'card', style:'margin-top:10px' }, [
-    el('label', { class:'muted small' }, 'Display Name'),
-    el('div', { style:'display:flex; gap:8px; margin-top:6px' }, [
-      el('input', { id:'dn-input', value: (u.displayName || ''), placeholder:'Your name', style:'flex:1; padding:10px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.1)' }),
-      el('button', { id:'dn-save', class:'btn' }, 'Save')
-    ])
-  ]);
-  root.querySelector('.container').appendChild(nameRow);
-  document.getElementById('dn-save').onclick = async ()=>{
-    const v = (document.getElementById('dn-input').value || '').trim().slice(0,50);
-    await db.collection('users').doc(uid).set({ displayName: v || u.handle }, { merge:true });
-    nameEl.textContent = v || u.handle;
-    toast('Display name updated.');
-  };
+  // Tiny "Edit profile" button near the profile header
+  const headerCard = root.querySelector('.profile-card');
+  const editBtn = el('button', { class:'btn', style:'margin-left:auto' }, 'Edit profile');
+  headerCard.appendChild(editBtn);
 
-  // Change photo
-  const photoRow = el('div', { class:'card', style:'margin-top:10px' }, [
-    el('div', { class:'muted small' }, 'Profile Photo'),
-    el('div', { style:'display:flex; gap:8px; margin-top:6px; align-items:center' }, [
-      el('button', { id:'photo-btn', class:'btn' }, 'Change photo'),
+  // Hidden inline editor
+  const editor = el('div', { class:'card', id:'prof-editor', style:'margin-top:10px; display:none' }, [
+    el('div', { class:'muted small' }, 'Edit profile'),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
+      el('label', { class:'muted small', style:'min-width:90px' }, 'Display name'),
+      el('input', { id:'dn-input', value:(u.displayName || ''), placeholder:'Your name', style:'flex:1; padding:10px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.1)' })
+    ]),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
+      el('label', { class:'muted small', style:'min-width:90px' }, 'Photo'),
+      el('button', { id:'photo-btn', class:'btn' }, 'Choose…'),
       el('input', { id:'photo-file', type:'file', accept:'image/*', style:'display:none' })
+    ]),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; justifyContent:"flex-end"' }, [
+      el('button', { id:'prof-cancel', class:'btn' }, 'Cancel'),
+      el('button', { id:'prof-save', class:'btn success' }, 'Save')
     ])
   ]);
-  root.querySelector('.container').appendChild(photoRow);
+  root.querySelector('.container').appendChild(editor);
 
+  editBtn.onclick = ()=> editor.style.display = editor.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('prof-cancel').onclick = ()=> editor.style.display = 'none';
   document.getElementById('photo-btn').onclick = ()=> document.getElementById('photo-file').click();
-  document.getElementById('photo-file').addEventListener('change', async (e)=>{
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    if (f.size > 2 * 1024 * 1024) return toast('Max 2MB image.');
-    const ref = storage.ref(`avatars/${uid}/profile.jpg`);
-    await ref.put(f, { contentType: f.type || 'image/jpeg' });
-    const url = await ref.getDownloadURL();
-    await db.collection('users').doc(uid).set({ photoURL: url }, { merge:true });
-    avatarEl.src = url;
-    toast('Photo updated.');
+
+  let chosenFile = null;
+  document.getElementById('photo-file').addEventListener('change', (e)=>{
+    chosenFile = (e.target.files && e.target.files[0]) || null;
+    if (chosenFile && chosenFile.size > 8 * 1024 * 1024){
+      toast('Max 8MB image. Pick a smaller one.');
+      chosenFile = null;
+      e.target.value = '';
+    }
   });
+
+  document.getElementById('prof-save').onclick = async ()=>{
+    const updates = {};
+    const newName = (document.getElementById('dn-input').value || '').trim().slice(0,50);
+    if (newName && newName !== u.displayName) updates.displayName = newName;
+
+    if (chosenFile){
+      const ref = storage.ref(`avatars/${uid}/profile.jpg`);
+      await ref.put(chosenFile, { contentType: chosenFile.type || 'image/jpeg' });
+      const url = await ref.getDownloadURL();
+      updates.photoURL = url;
+    }
+
+    if (Object.keys(updates).length){
+      await db.collection('users').doc(uid).set(updates, { merge:true });
+      if (updates.displayName) nameEl.textContent = updates.displayName;
+      if (updates.photoURL) avatarEl.src = updates.photoURL;
+      toast('Profile updated.');
+    }
+    editor.style.display = 'none';
+  };
 
   // Share links
   const base = location.origin;
@@ -332,10 +351,10 @@ async function renderViewByUid(uid){
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
 
-  // Header
+  // Public header: show displayName first
   document.getElementById('vp-avatar').src = u.photoURL || '/img/placeholder-avatar.png';
-  document.getElementById('vp-handle').textContent = '@' + (u.handle || 'unknown');
   document.getElementById('vp-name').textContent = u.displayName || u.handle || 'Friend';
+  document.getElementById('vp-handle').textContent = '@' + (u.handle || 'unknown');
   document.getElementById('vp-location').textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
   const socials = document.getElementById('vp-socials');
   socials.innerHTML = '';
@@ -403,7 +422,7 @@ async function submitAnswersFlow(targetUid, answers){
   if (!auth.currentUser) throw new Error('Not signed in');
   const me = auth.currentUser.uid;
 
-  // Duplicate guard using responder-owned collection (your rules allow owner write)
+  // Duplicate guard using responder-owned collection
   const sentRef = db.collection('users').doc(me).collection('sentRequests').doc(targetUid);
   const sentSnap = await sentRef.get();
   if (sentSnap.exists) throw new Error("You've already sent one.");
