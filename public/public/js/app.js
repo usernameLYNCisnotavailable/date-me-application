@@ -1,20 +1,14 @@
-// utils lives in the same /js folder
-import { el, ageFromBirthdate, allowedPairing } from './utils.js';
+import { ageFromBirthdate, allowedPairing, el } from './utils.js';
 
-// Firebase (compat) globals come from the <script> tags in index.html
-// firebase-config.js set window.firebaseConfig
+// Firebase (compat)
 const app = firebase.initializeApp(window.firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 const storage = firebase.storage();
 
-
-// optional: prove it boots
-console.log('app.js booted with projectId:', window.firebaseConfig?.projectId);
-
-
-
-/* ---------- routing ---------- */
+/* ==============================
+   Routing helpers
+============================== */
 const routes = {
   '': renderCreate,
   '#/create': renderCreate,
@@ -23,6 +17,7 @@ const routes = {
   '#/auth': renderAuth,
   '#/messages': renderMessages,
 };
+
 function isHandle(s){ return /^@[\w.\-]{2,30}$/.test(s); }
 function deepLink(){
   const p = location.pathname;
@@ -36,15 +31,19 @@ function deepLink(){
   if (h.startsWith('#/@') && isHandle(h.slice(2))) return { kind:'handle', value:h.slice(1) };
   return null;
 }
+
 window.addEventListener('hashchange', mount);
 window.addEventListener('popstate', mount);
 window.addEventListener('load', mount);
+
 document.getElementById('btn-create').onclick   = ()=> location.hash = '#/create';
 document.getElementById('btn-inbox').onclick    = ()=> location.hash = '#/inbox';
 document.getElementById('btn-profile').onclick  = ()=> location.hash = '#/me';
 document.getElementById('btn-auth').onclick     = ()=> location.hash = '#/auth';
 document.getElementById('btn-messages').onclick = ()=> location.hash = '#/messages';
+
 function toast(m){ alert(m); }
+
 async function mount(){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -57,7 +56,9 @@ async function mount(){
   await fn();
 }
 
-/* ---------- local storage cache ---------- */
+/* ==============================
+   Local cache keys
+============================== */
 const LS = {
   draftQuestions: 'lynctree_draft_questions',
   pendingAnswers: targetUid => `pending_answers_${targetUid}`,
@@ -65,7 +66,9 @@ const LS = {
   pendingRedirect: 'pending_redirect_after_auth'
 };
 
-/* ---------- auth watcher: auto-finish pending submit ---------- */
+/* ==============================
+   Auth watcher: auto-finish pending submission
+============================== */
 auth.onAuthStateChanged(async (u)=>{
   const target = localStorage.getItem(LS.pendingTarget);
   const redirect = localStorage.getItem(LS.pendingRedirect);
@@ -87,7 +90,9 @@ auth.onAuthStateChanged(async (u)=>{
   }
 });
 
-/* ---------- CREATE (p1) ---------- */
+/* ==============================
+   CREATE (p1 writes questions)
+============================== */
 async function renderCreate(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-create');
@@ -160,7 +165,9 @@ async function renderCreate(){
   }
 }
 
-/* ---------- AUTH ---------- */
+/* ==============================
+   AUTH (email+password only)
+============================== */
 async function renderAuth(){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -213,62 +220,105 @@ async function ensureProfile(uid, extra = {}){
   }
 }
 
-/* ---------- ME ---------- */
+/* ==============================
+   ME (profile + single Edit Profile)
+============================== */
 async function renderMe(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-profile');
-  root.innerHTML = '';
   root.appendChild(tpl.content.cloneNode(true));
   if (!auth.currentUser){ return renderAuth(); }
   const uid = auth.currentUser.uid;
 
-  const [uDoc, pDoc] = await Promise.all([
-    db.collection('users').doc(uid).get(),
-    db.collection('profiles').doc(uid).get()
-  ]);
+  const uDoc = await db.collection('users').doc(uid).get();
+  const pDoc = await db.collection('profiles').doc(uid).get();
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
-root.appendChild(buildProfileHeader({
-  avatarUrl: u.photoURL,
-  displayName: u.displayName,
-  handle: u.handle,
-  age: ageFromBirthdate(u.birthdate),
-  city: u.province || '',
-  bio: u.bio
-}));
 
- const avatarEl = document.getElementById('me-avatar');
-avatarEl.classList.add('sun-ring');   // <-- add this line
-
+  const avatarEl = document.getElementById('me-avatar');
   const handleEl = document.getElementById('me-handle');
-  const nameEl   = document.getElementById('me-name');
-  const locEl    = document.getElementById('me-location');
-  const bioEl    = document.getElementById('me-bio');
-  const socials  = document.getElementById('me-socials');
+  const nameEl = document.getElementById('me-name');
+  const locEl = document.getElementById('me-location');
+  const bioEl = document.getElementById('me-bio');
+  const socials = document.getElementById('me-socials');
 
   avatarEl.src = u.photoURL || '/img/placeholder-avatar.png';
-  handleEl.textContent = '@' + (u.handle || 'user');
-  nameEl.textContent   = u.displayName || u.handle || 'Friend';
-  locEl.textContent    = `${u.province || 'QC'} ${u.country ? '🇨🇦' : ''}`;
-  bioEl.textContent    = (u.bio && u.bio.trim()) ? u.bio : 'Add a short bio in “Edit profile”.';
+  handleEl.textContent = '@' + u.handle;
+  nameEl.textContent = u.displayName || u.handle;  // public name
+  locEl.textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
+  bioEl.textContent = u.bio || '';
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
-  // single Edit Profile button
-  const header = root.querySelector('.sun-header');
-  const editBtn = el('button', { class:'btn primary', id:'btn-edit-profile', style:'margin-left:auto' }, 'Edit profile');
-  header.appendChild(editBtn);
+  // Tiny "Edit profile" button near the profile header
+  const headerCard = root.querySelector('.profile-card');
+  const editBtn = el('button', { class:'btn', style:'margin-left:auto' }, 'Edit profile');
+  headerCard.appendChild(editBtn);
 
-  // share links
+  // Hidden inline editor
+  const editor = el('div', { class:'card', id:'prof-editor', style:'margin-top:10px; display:none' }, [
+    el('div', { class:'muted small' }, 'Edit profile'),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
+      el('label', { class:'muted small', style:'min-width:90px' }, 'Display name'),
+      el('input', { id:'dn-input', value:(u.displayName || ''), placeholder:'Your name', style:'flex:1; padding:10px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.1)' })
+    ]),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
+      el('label', { class:'muted small', style:'min-width:90px' }, 'Photo'),
+      el('button', { id:'photo-btn', class:'btn' }, 'Choose…'),
+      el('input', { id:'photo-file', type:'file', accept:'image/*', style:'display:none' })
+    ]),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; justifyContent:"flex-end"' }, [
+      el('button', { id:'prof-cancel', class:'btn' }, 'Cancel'),
+      el('button', { id:'prof-save', class:'btn success' }, 'Save')
+    ])
+  ]);
+  root.querySelector('.container').appendChild(editor);
+
+  editBtn.onclick = ()=> editor.style.display = editor.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('prof-cancel').onclick = ()=> editor.style.display = 'none';
+  document.getElementById('photo-btn').onclick = ()=> document.getElementById('photo-file').click();
+
+  let chosenFile = null;
+  document.getElementById('photo-file').addEventListener('change', (e)=>{
+    chosenFile = (e.target.files && e.target.files[0]) || null;
+    if (chosenFile && chosenFile.size > 8 * 1024 * 1024){
+      toast('Max 8MB image. Pick a smaller one.');
+      chosenFile = null;
+      e.target.value = '';
+    }
+  });
+
+  document.getElementById('prof-save').onclick = async ()=>{
+    const updates = {};
+    const newName = (document.getElementById('dn-input').value || '').trim().slice(0,50);
+    if (newName && newName !== u.displayName) updates.displayName = newName;
+
+    if (chosenFile){
+      const ref = storage.ref(`avatars/${uid}/profile.jpg`);
+      await ref.put(chosenFile, { contentType: chosenFile.type || 'image/jpeg' });
+      const url = await ref.getDownloadURL();
+      updates.photoURL = url;
+    }
+
+    if (Object.keys(updates).length){
+      await db.collection('users').doc(uid).set(updates, { merge:true });
+      if (updates.displayName) nameEl.textContent = updates.displayName;
+      if (updates.photoURL) avatarEl.src = updates.photoURL;
+      toast('Profile updated.');
+    }
+    editor.style.display = 'none';
+  };
+
+  // Share links
   const base = location.origin;
   const handleLink = `${base}/@${u.handle}`;
   const uidLink    = `${base}/p/${uid}`;
   document.getElementById('share-handle').value = handleLink;
   document.getElementById('share-uid').value    = uidLink;
-  document.getElementById('copy-handle').onclick = ()=> { navigator.clipboard.writeText(handleLink); alert('Copied handle link'); };
-  document.getElementById('copy-uid').onclick    = ()=> { navigator.clipboard.writeText(uidLink); alert('Copied backup link'); };
+  document.getElementById('copy-handle').onclick = ()=> { navigator.clipboard.writeText(handleLink); toast('Copied handle link'); };
+  document.getElementById('copy-uid').onclick    = ()=> { navigator.clipboard.writeText(uidLink); toast('Copied backup link'); };
 
-  // questions preview
+  // My questions preview
   const list = document.getElementById('my-questions');
   list.innerHTML = '';
   (p.questions || []).forEach((q,i)=>{
@@ -277,72 +327,18 @@ avatarEl.classList.add('sun-ring');   // <-- add this line
       el('div', { class:'muted small' }, `Q${i+1}`)
     ]));
   });
-
-  editBtn.onclick = ()=> openEditModal(u);
-
-  function openEditModal(user){
-    const modalTpl = document.getElementById('tpl-edit-profile');
-    const node = modalTpl.content.cloneNode(true);
-    document.body.appendChild(node);
-
-    const backdrop = document.querySelector('.modal-backdrop');
-    const closeBtn = document.getElementById('ep-close');
-    const cancelBtn= document.getElementById('ep-cancel');
-    const saveBtn  = document.getElementById('ep-save');
-    const fileInp  = document.getElementById('ep-file');
-    const preview  = document.getElementById('ep-preview');
-    const nameInp  = document.getElementById('ep-display');
-    const bioInp   = document.getElementById('ep-bio');
-
-    preview.src = user.photoURL || '/img/placeholder-avatar.png';
-    nameInp.value = user.displayName || user.handle || '';
-    bioInp.value  = user.bio || '';
-
-    preview.parentElement.addEventListener('click', ()=> fileInp.click());
-    fileInp.addEventListener('change', ()=>{
-      const f = fileInp.files && fileInp.files[0];
-      if (!f) return;
-      if (f.size > 8 * 1024 * 1024){ alert('Max 8MB image'); fileInp.value=''; return; }
-      const reader = new FileReader();
-      reader.onload = ()=> preview.src = reader.result;
-      reader.readAsDataURL(f);
-    });
-
-    closeBtn.onclick = cancelBtn.onclick = ()=> backdrop.remove();
-
-    saveBtn.onclick = async ()=>{
-      try{
-        const patch = {
-          displayName: nameInp.value.trim().slice(0,40),
-          bio: bioInp.value.trim().slice(0,190)
-        };
-        const f = fileInp.files && fileInp.files[0];
-        if (f){
-          const dest = storage.ref().child(`avatars/${uid}/profile.jpg`);
-          await dest.put(f, { contentType: f.type || 'image/jpeg' });
-          patch.photoURL = await dest.getDownloadURL();
-        }
-        await db.collection('users').doc(uid).set(patch, { merge:true });
-
-        // reflect immediately
-        if (patch.displayName) document.getElementById('me-name').textContent = patch.displayName;
-        if (patch.bio !== undefined) document.getElementById('me-bio').textContent = patch.bio || 'Add a short bio in “Edit profile”.';
-        if (patch.photoURL) document.getElementById('me-avatar').src = patch.photoURL;
-
-        backdrop.remove();
-        alert('Saved');
-      }catch(e){ alert(e?.message || 'Failed to save'); }
-    };
-  }
 }
 
-/* ---------- VIEW p1 (public) ---------- */
+/* ==============================
+   VIEW p1 BY HANDLE/UID (p2 answers)
+============================== */
 async function renderViewByHandle(handleWithAt){
   const handle = handleWithAt.startsWith('@') ? handleWithAt.slice(1) : handleWithAt;
   const hDoc = await db.collection('handles').doc(handle).get();
   if (!hDoc.exists) return notFound();
   return renderViewByUid(hDoc.data().uid);
 }
+
 async function renderViewByUid(uid){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -355,19 +351,19 @@ async function renderViewByUid(uid){
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
 
+  // Public header: show displayName first
   document.getElementById('vp-avatar').src = u.photoURL || '/img/placeholder-avatar.png';
   document.getElementById('vp-name').textContent = u.displayName || u.handle || 'Friend';
   document.getElementById('vp-handle').textContent = '@' + (u.handle || 'unknown');
   document.getElementById('vp-location').textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
-  document.getElementById('vp-avatar').src = u.photoURL || '/img/placeholder-avatar.png';
-document.getElementById('vp-avatar').classList.add('sun-ring');  
-
   const socials = document.getElementById('vp-socials');
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
-  // questionnaire
+  // Questionnaire form
   const form = document.getElementById('answer-form');
+
+  // Restore local cached answers
   const restored = loadLocal(uid);
   (p.questions || []).forEach((q, idx)=>{
     const ta = el('textarea', { placeholder:'Your answer...' }, '');
@@ -379,9 +375,13 @@ document.getElementById('vp-avatar').classList.add('sun-ring');
     ]));
   });
 
-  document.getElementById('submit-answers').onclick = async ()=>{
+  // Submit
+  const submitBtn = document.getElementById('submit-answers');
+  submitBtn.onclick = async ()=>{
     const answers = collectAnswers(form);
     if (answers.length === 0) return toast('Write something first.');
+
+    // Save locally before any redirect
     saveLocal(uid, answers);
 
     if (!auth.currentUser){
@@ -392,7 +392,7 @@ document.getElementById('vp-avatar').classList.add('sun-ring');
     }
 
     try{
-      await submitAnswersFlow(uid, answers);
+      await submitAnswersFlow(uid, answers);   // throws if duplicate or forbidden
       clearLocal(uid);
       toast('Submitted!');
       renderViewByUid(uid);
@@ -401,6 +401,7 @@ document.getElementById('vp-avatar').classList.add('sun-ring');
     }
   };
 }
+
 function collectAnswers(form){
   const arr = [];
   form.querySelectorAll('textarea').forEach(t=> arr.push((t.value||'').slice(0,2000)));
@@ -415,14 +416,18 @@ function saveLocal(uid, answers){
 function clearLocal(uid){
   localStorage.removeItem(LS.pendingAnswers(uid));
 }
+
+// Submit with rule-friendly fallback
 async function submitAnswersFlow(targetUid, answers){
   if (!auth.currentUser) throw new Error('Not signed in');
   const me = auth.currentUser.uid;
 
+  // Duplicate guard using responder-owned collection
   const sentRef = db.collection('users').doc(me).collection('sentRequests').doc(targetUid);
   const sentSnap = await sentRef.get();
   if (sentSnap.exists) throw new Error("You've already sent one.");
 
+  // First try: full payload including responder snapshot
   const fullPayload = {
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     answers,
@@ -433,6 +438,7 @@ async function submitAnswersFlow(targetUid, answers){
   try {
     await db.collection('users').doc(targetUid).collection('applications').doc(me).set(fullPayload);
   } catch (e) {
+    // If rules block extra fields, retry with minimal payload your rules accept
     if (String(e && e.code).includes('permission') || String(e && e.message).toLowerCase().includes('permission')) {
       const minimalPayload = {
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -445,15 +451,18 @@ async function submitAnswersFlow(targetUid, answers){
     }
   }
 
+  // Track on responder side
   await sentRef.set({
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     status: 'pending'
   });
 }
+
 function notFound(){
   const root = document.getElementById('app');
   root.innerHTML = "<section class='container narrow'><div class='card'>User not found.</div></section>";
 }
+
 async function makeResponderSnapshot(uid){
   const doc = await db.collection('users').doc(uid).get();
   const u = doc.data() || {};
@@ -470,7 +479,9 @@ async function makeResponderSnapshot(uid){
   };
 }
 
-/* ---------- INBOX ---------- */
+/* ==============================
+   INBOX + DETAIL
+============================== */
 async function renderInbox(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-inbox');
@@ -489,6 +500,7 @@ async function renderInbox(){
     const data = docSnap.data();
     let r = data.responder;
 
+    // Fallback: if responder snapshot missing, fetch public user doc
     if (!r) {
       try {
         const userDoc = await db.collection('users').doc(docSnap.id).get();
@@ -510,6 +522,7 @@ async function renderInbox(){
     list.appendChild(row);
   }
 }
+
 async function renderInboxDetail(responderUid){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -571,7 +584,9 @@ async function renderInboxDetail(responderUid){
   }
 }
 
-/* ---------- messages placeholder ---------- */
+/* ==============================
+   MESSAGES placeholder
+============================== */
 async function renderMessages(){
   const root = document.getElementById('app');
   root.innerHTML = '<section class="container narrow"><div class="card">Messaging UI coming next. Friendships exist after acceptance.</div></section>';

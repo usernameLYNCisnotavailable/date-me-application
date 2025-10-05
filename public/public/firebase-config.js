@@ -1,4 +1,4 @@
-// DO NOT wrap this in export; make it global so it's always there
+// Replace with your actual config if different; this matches the last working project you gave me.
 window.firebaseConfig = {
   apiKey: "AIzaSyCTahUWyuA4-lGPwJqMMHRENJagFr6dIBg",
   authDomain: "lynctree-8e976.firebaseapp.com",
