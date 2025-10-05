@@ -1,9 +1,14 @@
 import { ageFromBirthdate, allowedPairing, el } from './utils.js';
 
+// Firebase (compat)
 const app = firebase.initializeApp(window.firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+const storage = firebase.storage();
 
+/* ==============================
+   Routing helpers
+============================== */
 const routes = {
   '': renderCreate,
   '#/create': renderCreate,
@@ -31,13 +36,13 @@ window.addEventListener('hashchange', mount);
 window.addEventListener('popstate', mount);
 window.addEventListener('load', mount);
 
-document.getElementById('btn-create').onclick = ()=> location.hash = '#/create';
-document.getElementById('btn-inbox').onclick  = ()=> location.hash = '#/inbox';
-document.getElementById('btn-profile').onclick= ()=> location.hash = '#/me';
-document.getElementById('btn-auth').onclick   = ()=> location.hash = '#/auth';
-document.getElementById('btn-messages').onclick=()=> location.hash = '#/messages';
+document.getElementById('btn-create').onclick   = ()=> location.hash = '#/create';
+document.getElementById('btn-inbox').onclick    = ()=> location.hash = '#/inbox';
+document.getElementById('btn-profile').onclick  = ()=> location.hash = '#/me';
+document.getElementById('btn-auth').onclick     = ()=> location.hash = '#/auth';
+document.getElementById('btn-messages').onclick = ()=> location.hash = '#/messages';
 
-auth.onAuthStateChanged(()=>{});
+function toast(m){ alert(m); }
 
 async function mount(){
   const root = document.getElementById('app');
@@ -45,16 +50,49 @@ async function mount(){
   const link = deepLink();
   if (link){
     if (link.kind === 'handle') return renderViewByHandle(link.value);
-    if (link.kind === 'uid') return renderViewByUid(link.value);
+    if (link.kind === 'uid')    return renderViewByUid(link.value);
   }
   const fn = routes[location.hash || '#/create'] || renderCreate;
   await fn();
 }
 
-function toast(m){ alert(m); }
+/* ==============================
+   Local cache keys
+============================== */
+const LS = {
+  draftQuestions: 'lynctree_draft_questions',
+  pendingAnswers: targetUid => `pending_answers_${targetUid}`,
+  pendingTarget: 'pending_target_uid',
+  pendingRedirect: 'pending_redirect_after_auth'
+};
 
-const DRAFT_KEY = 'lynctree_draft_questions';
+/* ==============================
+   Auth watcher: auto-finish pending submission
+============================== */
+auth.onAuthStateChanged(async (u)=>{
+  const target = localStorage.getItem(LS.pendingTarget);
+  const redirect = localStorage.getItem(LS.pendingRedirect);
+  if (u && target){
+    try{
+      const stored = JSON.parse(localStorage.getItem(LS.pendingAnswers(target)) || '[]');
+      await submitAnswersFlow(target, stored);
+      toast('Submitted!');
+    }catch(e){
+      console.warn('Auto-submit failed:', e);
+      toast(e?.message || 'Submission failed after sign-in.');
+    }finally{
+      localStorage.removeItem(LS.pendingAnswers(target));
+      localStorage.removeItem(LS.pendingTarget);
+      localStorage.removeItem(LS.pendingRedirect);
+      if (redirect) location.href = redirect;
+      else location.hash = '#/inbox';
+    }
+  }
+});
 
+/* ==============================
+   CREATE (p1 writes questions)
+============================== */
 async function renderCreate(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-create');
@@ -65,40 +103,29 @@ async function renderCreate(){
   const saveBtn = document.getElementById('save-draft');
   const publishBtn = document.getElementById('publish');
 
-  (JSON.parse(localStorage.getItem(DRAFT_KEY) || '[]')).forEach((q,i)=> list.appendChild(makeBubble(q, i)));
+  (JSON.parse(localStorage.getItem(LS.draftQuestions) || '[]'))
+    .forEach((q,i)=> list.appendChild(makeBubble(q, i)));
   if (list.children.length === 0){
     add('What’s your ideal lazy day?');
     add('Two truths and a lie about you?');
   }
   renumber();
 
-  function add(preset=''){
-    const count = list.querySelectorAll('.bubble').length;
-    if (count >= 7) return toast('Limit is 7 questions.');
-    list.appendChild(makeBubble(preset, count));
-    renumber();
-  }
-  function renumber(){
-    [...list.querySelectorAll('.bubble label')].forEach((lab, idx)=> lab.textContent = 'Question ' + (idx+1));
-    const canDelete = list.querySelectorAll('.bubble').length > 2;
-    list.querySelectorAll('.btn-del').forEach(btn=> btn.disabled = !canDelete);
-  }
-
   addBtn.onclick = ()=> add('What makes you laugh unexpectedly?');
   saveBtn.onclick = ()=>{
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(collect()));
+    localStorage.setItem(LS.draftQuestions, JSON.stringify(collect()));
     toast('Draft saved locally.');
   };
   publishBtn.onclick = async ()=>{
     const qs = collect();
     if (qs.length < 2) return toast('Minimum 2 questions.');
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(qs));
     if (!auth.currentUser){ await renderAuth(); if (!auth.currentUser) return; }
     await ensureProfile(auth.currentUser.uid);
     await db.collection('profiles').doc(auth.currentUser.uid).set({
       questions: qs,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge:true });
+    localStorage.setItem(LS.draftQuestions, JSON.stringify(qs));
     toast('Published! Share your link from Me.');
     location.hash = '#/me';
   };
@@ -110,6 +137,17 @@ async function renderCreate(){
       if (v) out.push(v.slice(0,120));
     });
     return out;
+  }
+  function add(preset=''){
+    const count = list.querySelectorAll('.bubble').length;
+    if (count >= 7) return toast('Limit is 7 questions.');
+    list.appendChild(makeBubble(preset, count));
+    renumber();
+  }
+  function renumber(){
+    [...list.querySelectorAll('.bubble label')].forEach((lab, idx)=> lab.textContent = 'Question ' + (idx+1));
+    const canDelete = list.querySelectorAll('.bubble').length > 2;
+    list.querySelectorAll('.btn-del').forEach(btn=> btn.disabled = !canDelete);
   }
   function makeBubble(text, index){
     const del = el('button', { class:'btn icon btn-del', title:'Delete', onclick: (e)=>{
@@ -127,6 +165,9 @@ async function renderCreate(){
   }
 }
 
+/* ==============================
+   AUTH (email+password only)
+============================== */
 async function renderAuth(){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -179,6 +220,9 @@ async function ensureProfile(uid, extra = {}){
   }
 }
 
+/* ==============================
+   ME (profile + single Edit Profile)
+============================== */
 async function renderMe(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-profile');
@@ -191,24 +235,90 @@ async function renderMe(){
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
 
-  document.getElementById('me-avatar').src = u.photoURL || '/img/placeholder-avatar.png';
-  document.getElementById('me-handle').textContent = '@' + u.handle;
-  document.getElementById('me-name').textContent = u.displayName || u.handle;
-  document.getElementById('me-location').textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
-  document.getElementById('me-bio').textContent = u.bio || '';
-
+  const avatarEl = document.getElementById('me-avatar');
+  const handleEl = document.getElementById('me-handle');
+  const nameEl = document.getElementById('me-name');
+  const locEl = document.getElementById('me-location');
+  const bioEl = document.getElementById('me-bio');
   const socials = document.getElementById('me-socials');
+
+  avatarEl.src = u.photoURL || '/img/placeholder-avatar.png';
+  handleEl.textContent = '@' + u.handle;
+  nameEl.textContent = u.displayName || u.handle;  // public name
+  locEl.textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
+  bioEl.textContent = u.bio || '';
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
+  // Tiny "Edit profile" button near the profile header
+  const headerCard = root.querySelector('.profile-card');
+  const editBtn = el('button', { class:'btn', style:'margin-left:auto' }, 'Edit profile');
+  headerCard.appendChild(editBtn);
+
+  // Hidden inline editor
+  const editor = el('div', { class:'card', id:'prof-editor', style:'margin-top:10px; display:none' }, [
+    el('div', { class:'muted small' }, 'Edit profile'),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
+      el('label', { class:'muted small', style:'min-width:90px' }, 'Display name'),
+      el('input', { id:'dn-input', value:(u.displayName || ''), placeholder:'Your name', style:'flex:1; padding:10px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.1)' })
+    ]),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
+      el('label', { class:'muted small', style:'min-width:90px' }, 'Photo'),
+      el('button', { id:'photo-btn', class:'btn' }, 'Choose…'),
+      el('input', { id:'photo-file', type:'file', accept:'image/*', style:'display:none' })
+    ]),
+    el('div', { style:'display:flex; gap:8px; margin-top:10px; justifyContent:"flex-end"' }, [
+      el('button', { id:'prof-cancel', class:'btn' }, 'Cancel'),
+      el('button', { id:'prof-save', class:'btn success' }, 'Save')
+    ])
+  ]);
+  root.querySelector('.container').appendChild(editor);
+
+  editBtn.onclick = ()=> editor.style.display = editor.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('prof-cancel').onclick = ()=> editor.style.display = 'none';
+  document.getElementById('photo-btn').onclick = ()=> document.getElementById('photo-file').click();
+
+  let chosenFile = null;
+  document.getElementById('photo-file').addEventListener('change', (e)=>{
+    chosenFile = (e.target.files && e.target.files[0]) || null;
+    if (chosenFile && chosenFile.size > 8 * 1024 * 1024){
+      toast('Max 8MB image. Pick a smaller one.');
+      chosenFile = null;
+      e.target.value = '';
+    }
+  });
+
+  document.getElementById('prof-save').onclick = async ()=>{
+    const updates = {};
+    const newName = (document.getElementById('dn-input').value || '').trim().slice(0,50);
+    if (newName && newName !== u.displayName) updates.displayName = newName;
+
+    if (chosenFile){
+      const ref = storage.ref(`avatars/${uid}/profile.jpg`);
+      await ref.put(chosenFile, { contentType: chosenFile.type || 'image/jpeg' });
+      const url = await ref.getDownloadURL();
+      updates.photoURL = url;
+    }
+
+    if (Object.keys(updates).length){
+      await db.collection('users').doc(uid).set(updates, { merge:true });
+      if (updates.displayName) nameEl.textContent = updates.displayName;
+      if (updates.photoURL) avatarEl.src = updates.photoURL;
+      toast('Profile updated.');
+    }
+    editor.style.display = 'none';
+  };
+
+  // Share links
   const base = location.origin;
   const handleLink = `${base}/@${u.handle}`;
-  const uidLink = `${base}/p/${uid}`;
+  const uidLink    = `${base}/p/${uid}`;
   document.getElementById('share-handle').value = handleLink;
-  document.getElementById('share-uid').value = uidLink;
+  document.getElementById('share-uid').value    = uidLink;
   document.getElementById('copy-handle').onclick = ()=> { navigator.clipboard.writeText(handleLink); toast('Copied handle link'); };
   document.getElementById('copy-uid').onclick    = ()=> { navigator.clipboard.writeText(uidLink); toast('Copied backup link'); };
 
+  // My questions preview
   const list = document.getElementById('my-questions');
   list.innerHTML = '';
   (p.questions || []).forEach((q,i)=>{
@@ -219,12 +329,16 @@ async function renderMe(){
   });
 }
 
+/* ==============================
+   VIEW p1 BY HANDLE/UID (p2 answers)
+============================== */
 async function renderViewByHandle(handleWithAt){
   const handle = handleWithAt.startsWith('@') ? handleWithAt.slice(1) : handleWithAt;
   const hDoc = await db.collection('handles').doc(handle).get();
   if (!hDoc.exists) return notFound();
   return renderViewByUid(hDoc.data().uid);
 }
+
 async function renderViewByUid(uid){
   const root = document.getElementById('app');
   root.innerHTML = '';
@@ -237,45 +351,113 @@ async function renderViewByUid(uid){
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
 
+  // Public header: show displayName first
   document.getElementById('vp-avatar').src = u.photoURL || '/img/placeholder-avatar.png';
-  document.getElementById('vp-handle').textContent = '@' + (u.handle || 'unknown');
   document.getElementById('vp-name').textContent = u.displayName || u.handle || 'Friend';
+  document.getElementById('vp-handle').textContent = '@' + (u.handle || 'unknown');
   document.getElementById('vp-location').textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
   const socials = document.getElementById('vp-socials');
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
+  // Questionnaire form
   const form = document.getElementById('answer-form');
-  (p.questions || []).forEach((q)=>{
+
+  // Restore local cached answers
+  const restored = loadLocal(uid);
+  (p.questions || []).forEach((q, idx)=>{
+    const ta = el('textarea', { placeholder:'Your answer...' }, '');
+    ta.value = restored[idx] || '';
+    ta.addEventListener('input', ()=> saveLocal(uid, collectAnswers(form)));
     form.appendChild(el('div', { class:'bubble card' }, [
       el('div', { class:'q' }, q),
-      el('textarea', { placeholder:'Your answer...' })
+      ta
     ]));
   });
 
-  document.getElementById('submit-answers').onclick = async ()=>{
-    if (!auth.currentUser){ await renderAuth(); if (!auth.currentUser) return; }
-    const me = auth.currentUser;
-    const existing = await db.collection('users').doc(uid).collection('applications').doc(me.uid).get();
-    if (existing.exists) return toast('You already applied to this profile.');
+  // Submit
+  const submitBtn = document.getElementById('submit-answers');
+  submitBtn.onclick = async ()=>{
+    const answers = collectAnswers(form);
+    if (answers.length === 0) return toast('Write something first.');
 
-    const answers = [];
-    form.querySelectorAll('textarea').forEach(t=> answers.push((t.value||'').slice(0,2000)));
-    const snapshotResponder = await makeResponderSnapshot(me.uid);
-    await db.collection('users').doc(uid).collection('applications').doc(me.uid).set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      answers,
-      responder: snapshotResponder,
-      status: 'pending'
-    });
-    await db.collection('users').doc(me.uid).collection('sentRequests').doc(uid).set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      status: 'pending'
-    });
-    toast('Submitted!');
-    location.hash = '#/inbox';
+    // Save locally before any redirect
+    saveLocal(uid, answers);
+
+    if (!auth.currentUser){
+      localStorage.setItem(LS.pendingTarget, uid);
+      localStorage.setItem(LS.pendingRedirect, location.pathname + location.search + location.hash);
+      location.hash = '#/auth';
+      return;
+    }
+
+    try{
+      await submitAnswersFlow(uid, answers);   // throws if duplicate or forbidden
+      clearLocal(uid);
+      toast('Submitted!');
+      renderViewByUid(uid);
+    }catch(err){
+      toast(err?.message || 'Submit failed');
+    }
   };
 }
+
+function collectAnswers(form){
+  const arr = [];
+  form.querySelectorAll('textarea').forEach(t=> arr.push((t.value||'').slice(0,2000)));
+  return arr;
+}
+function loadLocal(uid){
+  try{ return JSON.parse(localStorage.getItem(LS.pendingAnswers(uid)) || '[]'); }catch{ return []; }
+}
+function saveLocal(uid, answers){
+  localStorage.setItem(LS.pendingAnswers(uid), JSON.stringify(answers));
+}
+function clearLocal(uid){
+  localStorage.removeItem(LS.pendingAnswers(uid));
+}
+
+// Submit with rule-friendly fallback
+async function submitAnswersFlow(targetUid, answers){
+  if (!auth.currentUser) throw new Error('Not signed in');
+  const me = auth.currentUser.uid;
+
+  // Duplicate guard using responder-owned collection
+  const sentRef = db.collection('users').doc(me).collection('sentRequests').doc(targetUid);
+  const sentSnap = await sentRef.get();
+  if (sentSnap.exists) throw new Error("You've already sent one.");
+
+  // First try: full payload including responder snapshot
+  const fullPayload = {
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    answers,
+    responder: await makeResponderSnapshot(me),
+    status: 'pending'
+  };
+
+  try {
+    await db.collection('users').doc(targetUid).collection('applications').doc(me).set(fullPayload);
+  } catch (e) {
+    // If rules block extra fields, retry with minimal payload your rules accept
+    if (String(e && e.code).includes('permission') || String(e && e.message).toLowerCase().includes('permission')) {
+      const minimalPayload = {
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        answers,
+        status: 'pending'
+      };
+      await db.collection('users').doc(targetUid).collection('applications').doc(me).set(minimalPayload);
+    } else {
+      throw e;
+    }
+  }
+
+  // Track on responder side
+  await sentRef.set({
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    status: 'pending'
+  });
+}
+
 function notFound(){
   const root = document.getElementById('app');
   root.innerHTML = "<section class='container narrow'><div class='card'>User not found.</div></section>";
@@ -297,6 +479,9 @@ async function makeResponderSnapshot(uid){
   };
 }
 
+/* ==============================
+   INBOX + DETAIL
+============================== */
 async function renderInbox(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-inbox');
@@ -311,12 +496,22 @@ async function renderInbox(){
     .orderBy('createdAt','desc').limit(50).get();
   if (q.empty){ list.innerHTML = "<div class='card'>Nothing here yet.</div>"; return; }
 
-  q.forEach(docSnap => {
+  for (const docSnap of q.docs) {
     const data = docSnap.data();
-    const r = data.responder || {};
+    let r = data.responder;
+
+    // Fallback: if responder snapshot missing, fetch public user doc
+    if (!r) {
+      try {
+        const userDoc = await db.collection('users').doc(docSnap.id).get();
+        const u = userDoc.data() || {};
+        r = { displayName: u.displayName || u.handle || 'Someone', handle: u.handle || 'anon', photoURL: u.photoURL || '' };
+      } catch (_) { r = { displayName: 'Someone', handle: 'anon', photoURL: '' }; }
+    }
+
     const row = el('div', { class:'item', onclick: ()=> renderInboxDetail(docSnap.id) }, [
       el('div', { class:'row' }, [
-        el('img', { class:'avatar-sm', src: r.photoURL || '/img/placeholder-avatar.png' }),
+        el('img', { class:'avatar-sm', src: (r.photoURL || '/img/placeholder-avatar.png') }),
         el('div', {}, [
           el('div', { class:'strong' }, r.displayName || r.handle || 'Someone'),
           el('div', { class:'muted small' }, '@' + (r.handle || 'anon'))
@@ -325,7 +520,7 @@ async function renderInbox(){
       ])
     ]);
     list.appendChild(row);
-  });
+  }
 }
 
 async function renderInboxDetail(responderUid){
@@ -340,7 +535,18 @@ async function renderInboxDetail(responderUid){
   const appDoc = await db.collection('users').doc(me).collection('applications').doc(responderUid).get();
   if (!appDoc.exists){ return notFound(); }
   const data = appDoc.data();
-  document.getElementById('id-title').textContent = `Application from ${data?.responder?.displayName || data?.responder?.handle || 'Someone'}`;
+
+  let titleName = data?.responder?.displayName || data?.responder?.handle;
+  if (!titleName) {
+    try {
+      const userDoc = await db.collection('users').doc(responderUid).get();
+      const u = userDoc.data() || {};
+      titleName = u.displayName || u.handle || 'Someone';
+    } catch (_) {
+      titleName = 'Someone';
+    }
+  }
+  document.getElementById('id-title').textContent = `Application from ${titleName}`;
 
   const answersWrap = document.getElementById('id-answers');
   answersWrap.innerHTML = '';
@@ -378,6 +584,9 @@ async function renderInboxDetail(responderUid){
   }
 }
 
+/* ==============================
+   MESSAGES placeholder
+============================== */
 async function renderMessages(){
   const root = document.getElementById('app');
   root.innerHTML = '<section class="container narrow"><div class="card">Messaging UI coming next. Friendships exist after acceptance.</div></section>';
