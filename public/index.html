@@ -70,6 +70,40 @@
           <div class="socials" id="me-socials"></div>
         </div>
       </div>
+<!-- EDIT PROFILE MODAL -->
+<template id="tpl-edit-profile">
+  <div class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal card">
+      <div class="modal-header">
+        <div class="title">Edit Profile</div>
+        <button class="btn icon" id="ep-close" aria-label="Close">✕</button>
+      </div>
+
+      <div class="ep-grid">
+        <div class="ep-avatar">
+          <label class="ep-avatar-wrap">
+            <img id="ep-preview" src="img/placeholder-avatar.png" alt="Avatar preview">
+            <input id="ep-file" type="file" accept="image/*" capture="environment" hidden>
+            <span class="ep-avatar-edit">Change photo</span>
+          </label>
+        </div>
+
+        <div class="ep-fields">
+          <label>Display name</label>
+          <input id="ep-display" type="text" maxlength="40" placeholder="Your name">
+
+          <label>Bio</label>
+          <textarea id="ep-bio" maxlength="190" placeholder="Add bio"></textarea>
+
+          <div class="modal-actions">
+            <button id="ep-cancel" class="btn">Cancel</button>
+            <button id="ep-save" class="btn success">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
 
       <div class="share card">
         <div class="muted small" style="margin-bottom:6px">Share this link in your bio</div>

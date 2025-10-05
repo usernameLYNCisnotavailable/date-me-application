@@ -95,3 +95,35 @@ body{
 .share{margin-top:14px}
 .share-row{display:flex; gap:8px}
 .share-row input{flex:1; padding:10px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.1); background:white}
+/* modal */
+.modal-backdrop{
+  position:fixed; inset:0; background:rgba(13,24,46,.45);
+  display:flex; align-items:center; justify-content:center; z-index:60;
+}
+.modal{ width:min(720px, 96vw); padding:16px; }
+.modal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px }
+.modal .title{ font-weight:800; font-size:1.1rem }
+.btn.icon{ padding:6px 10px }
+
+.ep-grid{ display:grid; grid-template-columns:160px 1fr; gap:16px }
+.ep-avatar-wrap{ display:block; position:relative; cursor:pointer }
+#ep-preview{
+  width:140px; height:140px; border-radius:22%; object-fit:cover; background:#eef3ff;
+  box-shadow:0 6px 18px rgba(10,40,90,.12);
+}
+.ep-avatar-edit{
+  position:absolute; left:0; right:0; bottom:6px; text-align:center;
+  background:rgba(0,0,0,.55); color:white; font-size:.85rem; padding:4px 6px; border-radius:10px;
+  margin:0 8px;
+}
+.ep-fields label{ display:block; font-weight:700; margin:.4rem 0 .2rem }
+#ep-display, #ep-bio{
+  width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.12); background:white;
+}
+#ep-bio{ min-height:90px; resize:vertical }
+.modal-actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px }
+
+@media (max-width:560px){
+  .ep-grid{ grid-template-columns:1fr; }
+  #ep-preview{ width:120px; height:120px; }
+}
