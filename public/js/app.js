@@ -226,88 +226,117 @@ async function ensureProfile(uid, extra = {}){
 async function renderMe(){
   const root = document.getElementById('app');
   const tpl = document.getElementById('tpl-profile');
+  root.innerHTML = '';
   root.appendChild(tpl.content.cloneNode(true));
   if (!auth.currentUser){ return renderAuth(); }
   const uid = auth.currentUser.uid;
 
-  const uDoc = await db.collection('users').doc(uid).get();
-  const pDoc = await db.collection('profiles').doc(uid).get();
+  const [uDoc, pDoc] = await Promise.all([
+    db.collection('users').doc(uid).get(),
+    db.collection('profiles').doc(uid).get()
+  ]);
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
 
   const avatarEl = document.getElementById('me-avatar');
   const handleEl = document.getElementById('me-handle');
-  const nameEl = document.getElementById('me-name');
-  const locEl = document.getElementById('me-location');
-  const bioEl = document.getElementById('me-bio');
-  const socials = document.getElementById('me-socials');
+  const nameEl   = document.getElementById('me-name');
+  const locEl    = document.getElementById('me-location');
+  const bioEl    = document.getElementById('me-bio');
+  const socials  = document.getElementById('me-socials');
 
   avatarEl.src = u.photoURL || '/img/placeholder-avatar.png';
-  handleEl.textContent = '@' + u.handle;
-  nameEl.textContent = u.displayName || u.handle;  // public name
-  locEl.textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
-  bioEl.textContent = u.bio || '';
+  handleEl.textContent = '@' + (u.handle || 'user');
+  nameEl.textContent   = u.displayName || u.handle || 'Friend';
+  locEl.textContent    = `${u.province || 'QC'} ${u.country ? '🇨🇦' : ''}`;
+  bioEl.textContent    = u.bio || '';
+
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
-  // Tiny "Edit profile" button near the profile header
-  const headerCard = root.querySelector('.profile-card');
-  const editBtn = el('button', { class:'btn', style:'margin-left:auto' }, 'Edit profile');
-  headerCard.appendChild(editBtn);
+  // Single button, programmatic
+  const header = root.querySelector('.profile-card');
+  const editBtn = el('button', { class:'btn primary', id:'btn-edit-profile', style:'margin-left:auto' }, 'Edit profile');
+  header.appendChild(editBtn);
 
-  // Hidden inline editor
-  const editor = el('div', { class:'card', id:'prof-editor', style:'margin-top:10px; display:none' }, [
-    el('div', { class:'muted small' }, 'Edit profile'),
-    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
-      el('label', { class:'muted small', style:'min-width:90px' }, 'Display name'),
-      el('input', { id:'dn-input', value:(u.displayName || ''), placeholder:'Your name', style:'flex:1; padding:10px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.1)' })
-    ]),
-    el('div', { style:'display:flex; gap:8px; margin-top:10px; align-items:center' }, [
-      el('label', { class:'muted small', style:'min-width:90px' }, 'Photo'),
-      el('button', { id:'photo-btn', class:'btn' }, 'Choose…'),
-      el('input', { id:'photo-file', type:'file', accept:'image/*', style:'display:none' })
-    ]),
-    el('div', { style:'display:flex; gap:8px; margin-top:10px; justifyContent:"flex-end"' }, [
-      el('button', { id:'prof-cancel', class:'btn' }, 'Cancel'),
-      el('button', { id:'prof-save', class:'btn success' }, 'Save')
-    ])
-  ]);
-  root.querySelector('.container').appendChild(editor);
+  // Share links
+  const base = location.origin;
+  const handleLink = `${base}/@${u.handle}`;
+  const uidLink    = `${base}/p/${uid}`;
+  document.getElementById('share-handle').value = handleLink;
+  document.getElementById('share-uid').value    = uidLink;
+  document.getElementById('copy-handle').onclick = ()=> { navigator.clipboard.writeText(handleLink); alert('Copied handle link'); };
+  document.getElementById('copy-uid').onclick    = ()=> { navigator.clipboard.writeText(uidLink); alert('Copied backup link'); };
 
-  editBtn.onclick = ()=> editor.style.display = editor.style.display === 'none' ? 'block' : 'none';
-  document.getElementById('prof-cancel').onclick = ()=> editor.style.display = 'none';
-  document.getElementById('photo-btn').onclick = ()=> document.getElementById('photo-file').click();
-
-  let chosenFile = null;
-  document.getElementById('photo-file').addEventListener('change', (e)=>{
-    chosenFile = (e.target.files && e.target.files[0]) || null;
-    if (chosenFile && chosenFile.size > 8 * 1024 * 1024){
-      toast('Max 8MB image. Pick a smaller one.');
-      chosenFile = null;
-      e.target.value = '';
-    }
+  // Questions preview
+  const list = document.getElementById('my-questions');
+  list.innerHTML = '';
+  (p.questions || []).forEach((q,i)=>{
+    list.appendChild(el('div', { class:'bubble card' }, [
+      el('div', { class:'q' }, q),
+      el('div', { class:'muted small' }, `Q${i+1}`)
+    ]));
   });
 
-  document.getElementById('prof-save').onclick = async ()=>{
-    const updates = {};
-    const newName = (document.getElementById('dn-input').value || '').trim().slice(0,50);
-    if (newName && newName !== u.displayName) updates.displayName = newName;
+  // Open modal
+  editBtn.onclick = ()=> openEditModal(u);
 
-    if (chosenFile){
-      const ref = storage.ref(`avatars/${uid}/profile.jpg`);
-      await ref.put(chosenFile, { contentType: chosenFile.type || 'image/jpeg' });
-      const url = await ref.getDownloadURL();
-      updates.photoURL = url;
-    }
+  function openEditModal(user){
+    const modalTpl = document.getElementById('tpl-edit-profile');
+    const node = modalTpl.content.cloneNode(true);
+    document.body.appendChild(node);
 
-    if (Object.keys(updates).length){
-      await db.collection('users').doc(uid).set(updates, { merge:true });
-      if (updates.displayName) nameEl.textContent = updates.displayName;
-      if (updates.photoURL) avatarEl.src = updates.photoURL;
-      toast('Profile updated.');
-    }
-    editor.style.display = 'none';
-  };
+    const backdrop = document.querySelector('.modal-backdrop');
+    const closeBtn = document.getElementById('ep-close');
+    const cancelBtn= document.getElementById('ep-cancel');
+    const saveBtn  = document.getElementById('ep-save');
+    const fileInp  = document.getElementById('ep-file');
+    const preview  = document.getElementById('ep-preview');
+    const nameInp  = document.getElementById('ep-display');
+    const bioInp   = document.getElementById('ep-bio');
+
+    preview.src = user.photoURL || '/img/placeholder-avatar.png';
+    nameInp.value = user.displayName || user.handle || '';
+    bioInp.value  = user.bio || '';
+
+    preview.parentElement.addEventListener('click', ()=> fileInp.click());
+    fileInp.addEventListener('change', ()=>{
+      const f = fileInp.files && fileInp.files[0];
+      if (!f) return;
+      if (f.size > 8 * 1024 * 1024){ alert('Max 8MB image'); fileInp.value=''; return; }
+      const reader = new FileReader();
+      reader.onload = ()=> preview.src = reader.result;
+      reader.readAsDataURL(f);
+    });
+
+    closeBtn.onclick = cancelBtn.onclick = ()=> backdrop.remove();
+
+    saveBtn.onclick = async ()=>{
+      try{
+        const patch = {
+          displayName: nameInp.value.trim().slice(0,40),
+          bio: bioInp.value.trim().slice(0,190)
+        };
+        const f = fileInp.files && fileInp.files[0];
+        if (f){
+          const dest = storage.ref().child(`avatars/${uid}/profile.jpg`);
+          await dest.put(f, { contentType: f.type || 'image/jpeg' }); // matches your Storage rule
+          patch.photoURL = await dest.getDownloadURL();
+        }
+        await db.collection('users').doc(uid).set(patch, { merge:true });
+
+        // reflect immediately
+        if (patch.displayName) nameEl.textContent = patch.displayName;
+        if (patch.bio !== undefined) bioEl.textContent = patch.bio;
+        if (patch.photoURL) avatarEl.src = patch.photoURL;
+
+        backdrop.remove();
+        alert('Saved');
+      }catch(e){ alert(e?.message || 'Failed to save'); }
+    };
+  }
+}
+
 
   // Share links
   const base = location.origin;
@@ -327,7 +356,7 @@ async function renderMe(){
       el('div', { class:'muted small' }, `Q${i+1}`)
     ]));
   });
-}
+
 
 /* ==============================
    VIEW p1 BY HANDLE/UID (p2 answers)
