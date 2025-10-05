@@ -228,8 +228,18 @@ async function renderMe(){
   ]);
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
+root.appendChild(buildProfileHeader({
+  avatarUrl: u.photoURL,
+  displayName: u.displayName,
+  handle: u.handle,
+  age: ageFromBirthdate(u.birthdate),
+  city: u.province || '',
+  bio: u.bio
+}));
 
-  const avatarEl = document.getElementById('me-avatar');
+ const avatarEl = document.getElementById('me-avatar');
+avatarEl.classList.add('sun-ring');   // <-- add this line
+
   const handleEl = document.getElementById('me-handle');
   const nameEl   = document.getElementById('me-name');
   const locEl    = document.getElementById('me-location');
@@ -349,6 +359,9 @@ async function renderViewByUid(uid){
   document.getElementById('vp-name').textContent = u.displayName || u.handle || 'Friend';
   document.getElementById('vp-handle').textContent = '@' + (u.handle || 'unknown');
   document.getElementById('vp-location').textContent = `${u.province || ''} ${u.country ? '🇨🇦' : ''}`;
+  document.getElementById('vp-avatar').src = u.photoURL || '/img/placeholder-avatar.png';
+document.getElementById('vp-avatar').classList.add('sun-ring');  
+
   const socials = document.getElementById('vp-socials');
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));

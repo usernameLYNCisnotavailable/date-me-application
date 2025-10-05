@@ -158,3 +158,138 @@ input[type="text"],input[type="email"],input[type="password"],textarea{
   .sun-header{ grid-template-columns:auto 1fr; }
   .thought-wrap{ grid-column:1 / -1; }
 }
+/* ===== Floating header on sky (no background panel) ===== */
+
+.header-section {
+  margin: 10px 0 18px;
+  padding: 0 14px;
+}
+
+@media (min-width: 560px) {
+  .header-section { padding: 0 20px; }
+}
+
+/* Avatar + meta + cloud in one symmetric row that wraps nicely */
+
+.profile-hero {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "avatar meta"
+    "cloud cloud";
+  gap: 16px 18px;
+  align-items: center;
+}
+
+@media (min-width: 740px) {
+  .profile-hero {
+    grid-template-columns: auto 1fr minmax(240px, 34%);
+    grid-template-areas: "avatar meta cloud";
+  }
+}
+
+/* Avatar with permanent yellow story ring */
+
+.avatar-wrap {
+  grid-area: avatar;
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+}
+
+@media (min-width: 520px) {
+  .avatar-wrap { width: 136px; height: 136px; }
+}
+
+.avatar-photo {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 50%;
+  object-fit: cover;       /* crops like Instagram */
+  object-position: center; /* centers faces */
+  background: #dfe8f3;     /* pleasant fallback */
+}
+
+/* visible ring on top of photo like a story outline */
+.avatar-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 4px #ffd43b,       /* main yellow ring */
+    0 0 0 10px rgba(255,212,59,0.22),   /* soft aura */
+    0 10px 28px rgba(22,41,77,0.08);    /* subtle drop */
+}
+
+/* Name / handle / age+city stack */
+
+.profile-meta {
+  grid-area: meta;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: center;
+}
+
+.display-name {
+  font-weight: 800;
+  font-size: clamp(22px, 3.4vw, 36px);
+  line-height: 1.05;
+  color: #0f2742;
+}
+
+.handle {
+  font-weight: 600;
+  color: #1c3e69;
+  opacity: 0.95;
+}
+
+.age-city {
+  color: #1b3d66;
+  opacity: 0.9;
+}
+
+/* Compact thought cloud for the short bio */
+
+.bio-cloud {
+  grid-area: cloud;
+  position: relative;
+  padding: 12px 14px;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow:
+    0 14px 28px rgba(22,41,77,0.07),
+    0 4px 8px rgba(22,41,77,0.05);
+  max-width: 100%;
+}
+
+.bio-cloud p {
+  margin: 0;
+  color: #0f2742;
+  font-size: clamp(14px, 2.6vw, 18px);
+  line-height: 1.35;
+}
+
+/* two thought dots for style; adjust if you don’t like it */
+.bio-cloud::before,
+.bio-cloud::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 6px 14px rgba(22,41,77,0.08);
+}
+
+.bio-cloud::before {
+  width: 12px; height: 12px;
+  bottom: -10px;
+}
+
+.bio-cloud::after {
+  width: 8px; height: 8px;
+  bottom: -22px; left: 30px;
+}
