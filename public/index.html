@@ -182,8 +182,15 @@
 
  <script type="module" src="./js/utils.js"></script>
 <script type="module" src="./js/app.js"></script>
-<link rel="stylesheet" href="./css/styles.css" />
+
 <script type="module" src="./js/app.js"></script>
+<link rel="stylesheet" href="/css/styles.css">
+
+<!-- 1) config as a classic script so window.firebaseConfig exists -->
+<script src="/firebase-config.js"></script>
+
+<!-- 2) your app as a module -->
+<script type="module" src="/js/app.js"></script>
 
 </body>
 </html>

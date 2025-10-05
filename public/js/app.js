@@ -1,16 +1,28 @@
 // utils lives in the same /js folder
 import { el, ageFromBirthdate, allowedPairing } from './utils.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getAuth } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { getFirestore } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getStorage } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
+
+import { el } from './utils.js';
+
+// IMPORTANT: do NOT import firebase-config here.
+// It was loaded as a plain script and set window.firebaseConfig.
+
+if (!window.firebaseConfig) {
+  console.error('firebaseConfig missing');  // guardrail so you see it immediately
+}
+
+const app = initializeApp(window.firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+// optional: prove it boots
+console.log('app.js booted with projectId:', window.firebaseConfig?.projectId);
 
 
-
-
-
-
-// Firebase (compat)
-const app = firebase.initializeApp(window.firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
-const storage = firebase.storage();
 
 /* ---------- routing ---------- */
 const routes = {

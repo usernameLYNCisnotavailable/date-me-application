@@ -1,4 +1,4 @@
-// /public/js/firebase-config.js
+// DO NOT wrap this in export; make it global so it's always there
 window.firebaseConfig = {
   apiKey: "AIzaSyCTahUWyuA4-lGPwJqMMHRENJagFr6dIBg",
   authDomain: "lynctree-8e976.firebaseapp.com",
