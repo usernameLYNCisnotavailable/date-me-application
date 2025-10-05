@@ -1,4 +1,10 @@
-import { ageFromBirthdate, allowedPairing, el } from './utils.js';
+// utils lives in the same /js folder
+import { el, ageFromBirthdate, allowedPairing } from './utils.js';
+
+// firebase-config.js is one level up from /js
+import { firebaseConfig } from '../firebase-config.js';
+
+
 
 // Firebase (compat)
 const app = firebase.initializeApp(window.firebaseConfig);

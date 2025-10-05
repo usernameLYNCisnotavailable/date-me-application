@@ -1,4 +1,4 @@
-window.firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyCTahUWyuA4-lGPwJqMMHRENJagFr6dIBg",
   authDomain: "lynctree-8e976.firebaseapp.com",
   projectId: "lynctree-8e976",
