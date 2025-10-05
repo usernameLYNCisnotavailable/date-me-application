@@ -2,7 +2,8 @@
 import { el, ageFromBirthdate, allowedPairing } from './utils.js';
 
 // firebase-config.js is one level up from /js
-import { firebaseConfig } from '../firebase-config.js';
+import { firebaseConfig } from './firebase-config.js';
+
 
 
 
