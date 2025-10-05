@@ -293,3 +293,32 @@ input[type="text"],input[type="email"],input[type="password"],textarea{
   width: 8px; height: 8px;
   bottom: -22px; left: 30px;
 }
+/* === floating profile header styling === */
+.sun-header {
+  background: none;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 0;
+  position: relative;
+}
+
+#me-avatar {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 4px solid gold; /* yellow outline “sun” */
+  object-fit: cover;
+}
+
+.profile-card {
+  background: transparent;
+  box-shadow: none;
+  border: none;
+}
+
+#me-name, #me-location, #me-bio {
+  text-align: center;
+}
