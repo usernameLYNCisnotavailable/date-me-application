@@ -254,10 +254,29 @@ async function renderMe(){
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
-  // Single button, programmatic
-  const header = root.querySelector('.profile-card');
-  const editBtn = el('button', { class:'btn primary', id:'btn-edit-profile', style:'margin-left:auto' }, 'Edit profile');
+ // Single button, programmatic (idempotent)
+const header = root.querySelector('.profile-card');
+
+// if a previous render already created it, reuse it
+let editBtn = header.querySelector('#btn-edit-profile');
+if (!editBtn) {
+  editBtn = el('button', {
+    class: 'btn primary',
+    id: 'btn-edit-profile',
+    style: 'margin-left:auto'
+  }, 'Edit profile');
   header.appendChild(editBtn);
+}
+
+// if somehow duplicates exist, nuke extras
+const dups = header.querySelectorAll('#btn-edit-profile');
+if (dups.length > 1) {
+  dups.forEach((n, i) => { if (i > 0) n.remove(); });
+}
+
+// wire click every time so it stays fresh
+editBtn.onclick = () => openEditModal(u);
+;
 
   // Share links
   const base = location.origin;
