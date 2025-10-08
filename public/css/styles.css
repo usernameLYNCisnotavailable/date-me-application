@@ -127,3 +127,31 @@ body{
   .ep-grid{ grid-template-columns:1fr; }
   #ep-preview{ width:120px; height:120px; }
 }
+/* === circular avatar + yellow ring === */
+.sun-avatar-wrap { position: relative; }           /* ensure crown can anchor */
+.sun-avatar {
+  border-radius: 50% !important;
+  object-fit: cover;
+  object-position: center;
+  width: 100%;
+  height: 100%;
+  background: #eef3ff;
+  border: 4px solid #ffd43b;                       /* visible yellow ring */
+  box-shadow: 0 0 0 8px rgba(255,212,59,.22);      /* soft glow */
+}
+
+/* crown edit button that hugs the avatar edge */
+.avatar-crown-btn {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  z-index: 3;
+  padding: 6px 10px;
+  line-height: 1;
+  border-radius: 9999px;
+  background: #0ea5e9;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(14,165,233,.35);
+}
+.avatar-crown-btn:hover { filter: brightness(1.05); }

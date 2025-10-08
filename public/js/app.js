@@ -254,29 +254,31 @@ async function renderMe(){
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
- // Single button, programmatic (idempotent)
-const header = root.querySelector('.profile-card');
+// Single button, programmatic (idempotent) — place as a "crown" on the avatar
+const header = root.querySelector('.sun-header');                // your header container
+const avatarWrap = header.querySelector('.sun-avatar-wrap');     // circle container
 
-// if a previous render already created it, reuse it
 let editBtn = header.querySelector('#btn-edit-profile');
 if (!editBtn) {
   editBtn = el('button', {
-    class: 'btn primary',
+    class: 'btn primary avatar-crown-btn',
     id: 'btn-edit-profile',
-    style: 'margin-left:auto'
-  }, 'Edit profile');
-  header.appendChild(editBtn);
+    title: 'Edit profile'
+  }, 'Edit');
+  // mount the button inside the avatar wrap so it sits like a crown
+  avatarWrap.appendChild(editBtn);
+} else {
+  // ensure correct class and location if a previous render created it
+  editBtn.classList.add('avatar-crown-btn');
+  if (editBtn.parentElement !== avatarWrap) avatarWrap.appendChild(editBtn);
 }
 
 // if somehow duplicates exist, nuke extras
-const dups = header.querySelectorAll('#btn-edit-profile');
-if (dups.length > 1) {
-  dups.forEach((n, i) => { if (i > 0) n.remove(); });
-}
+header.querySelectorAll('#btn-edit-profile').forEach((n, i) => { if (i > 0) n.remove(); });
 
-// wire click every time so it stays fresh
+// wire
 editBtn.onclick = () => openEditModal(u);
-;
+
 
   // Share links
   const base = location.origin;
