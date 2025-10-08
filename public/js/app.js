@@ -5,6 +5,11 @@ const app = firebase.initializeApp(window.firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 const storage = firebase.storage();
+// Stay signed in across refresh/navigation (compat)
+try {
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+} catch (_) { /* ignore */ }
+
 
 /* ==============================
    Routing helpers
@@ -238,12 +243,53 @@ async function renderMe(){
   const u = uDoc.data() || {};
   const p = pDoc.data() || { questions: [] };
 
-  const avatarEl = document.getElementById('me-avatar');
+  
   const handleEl = document.getElementById('me-handle');
   const nameEl   = document.getElementById('me-name');
   const locEl    = document.getElementById('me-location');
   const bioEl    = document.getElementById('me-bio');
   const socials  = document.getElementById('me-socials');
+// --- crown Edit button anchored to the avatar (p1 only) ---
+const avatarEl = document.getElementById('me-avatar');
+if (vp) {
+  vp.style.borderRadius = '50%';
+  vp.style.objectFit = 'cover';
+}
+// Guard: if template changed or avatar missing, bail gracefully
+if (avatarEl) {
+  // Ensure the avatar has a positioned wrapper so the crown can sit on it
+  let wrap = avatarEl.parentElement;
+  const needWrap = !wrap || !wrap.classList || !wrap.classList.contains('avatar-wrap-crown');
+  if (needWrap) {
+    // Create a positioned wrap and move the img inside it
+    wrap = document.createElement('div');
+    wrap.className = 'avatar-wrap-crown';
+    wrap.style.position = 'relative';
+    wrap.style.width = avatarEl.width ? avatarEl.width + 'px' : '128px';
+    wrap.style.height = avatarEl.height ? avatarEl.height + 'px' : '128px';
+    wrap.style.display = 'inline-block';
+    // Replace the img in DOM with the wrapped version
+    avatarEl.replaceWith(wrap);
+    wrap.appendChild(avatarEl);
+  }
+
+  // Create or reuse the single crown button
+  let editBtn = wrap.querySelector('#btn-edit-profile');
+  if (!editBtn) {
+    editBtn = document.createElement('button');
+    editBtn.id = 'btn-edit-profile';
+    editBtn.className = 'btn primary avatar-crown-btn';
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    wrap.appendChild(editBtn);
+  }
+
+  // Nuke accidental duplicates if some other render added one
+  wrap.querySelectorAll('#btn-edit-profile').forEach((n, i) => { if (i > 0) n.remove(); });
+
+  // Wire it
+  editBtn.onclick = () => openEditModal(u);
+}
 
   avatarEl.src = u.photoURL || '/img/placeholder-avatar.png';
   handleEl.textContent = '@' + (u.handle || 'user');
@@ -254,30 +300,6 @@ async function renderMe(){
   socials.innerHTML = '';
   Object.entries(u.socials || {}).forEach(([k,v])=> v && socials.appendChild(el('a',{href:v,target:'_blank'},k)));
 
-// Single button, programmatic (idempotent) — place as a "crown" on the avatar
-const header = root.querySelector('.sun-header');                // your header container
-const avatarWrap = header.querySelector('.sun-avatar-wrap');     // circle container
-
-let editBtn = header.querySelector('#btn-edit-profile');
-if (!editBtn) {
-  editBtn = el('button', {
-    class: 'btn primary avatar-crown-btn',
-    id: 'btn-edit-profile',
-    title: 'Edit profile'
-  }, 'Edit');
-  // mount the button inside the avatar wrap so it sits like a crown
-  avatarWrap.appendChild(editBtn);
-} else {
-  // ensure correct class and location if a previous render created it
-  editBtn.classList.add('avatar-crown-btn');
-  if (editBtn.parentElement !== avatarWrap) avatarWrap.appendChild(editBtn);
-}
-
-// if somehow duplicates exist, nuke extras
-header.querySelectorAll('#btn-edit-profile').forEach((n, i) => { if (i > 0) n.remove(); });
-
-// wire
-editBtn.onclick = () => openEditModal(u);
 
 
   // Share links
